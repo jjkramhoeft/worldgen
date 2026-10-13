@@ -6,6 +6,8 @@
  *     interpolated (Minecraft samples its noise per "cell" the same way):
  *        density = (surfaceY − y) + overhang noise × jaggedness
  *        caves   = min(density, cheese, spaghetti, noodle)
+ *     Noodle tubes are thinner than the lattice, so (as in Minecraft) their two
+ *     noises are interpolated raw and only combined into a tube per block.
  *  3. Surface rules per column (top block, filler, terracotta bands, deepslate,
  *     bedrock), sea water above the surface and lava pools deep down.
  *  4. Ore clusters, then "features": trees placed on a jittered grid.
@@ -145,14 +147,26 @@ export class VoxelGenerator {
       const sd = (Math.max(Math.abs(a), Math.abs(b)) - v.caves.spaghetti.radius) * 160 + (v.caves.entrances ? 0 : protect) + seabed;
       if (sd < d) d = sd;
     }
-    if (v.caves.noodle.enabled && depth > 6) {
-      const k = 1 / v.caves.noodle.scale;
-      const a = this.noodle[0].simplex3(wx * k, wy * k, wz * k);
-      const b = this.noodle[1].simplex3(wx * k, wy * k, wz * k);
-      const nd = (Math.max(Math.abs(a), Math.abs(b)) - v.caves.noodle.radius) * 220 + protect + seabed;
-      if (nd < d) d = nd;
-    }
     return d;
+  }
+
+  /** Whether the two noodle noise values carve a block at height wy in a column with surface sy. */
+  private noodleAir(a: number, b: number, sy: number, wy: number): boolean {
+    const depth = sy - wy;
+    if (depth <= 6) return false;
+    const c = this.v.caves;
+    const protect = Math.max(0, c.surfaceDepth - depth) * 4;
+    const seabed = sy < this.seaY + 3 ? Math.max(0, 9 - depth) * 8 : 0;
+    return (Math.max(Math.abs(a), Math.abs(b)) - c.noodle.radius) * 220 + protect + seabed <= 0;
+  }
+
+  /** Exact noodle-cave test for one block, sampling the noises directly instead of the lattice. */
+  isNoodle(wx: number, wy: number, wz: number): boolean {
+    if (!this.v.caves.noodle.enabled) return false;
+    const k = 1 / this.v.caves.noodle.scale;
+    const a = this.noodle[0].simplex3(wx * k, wy * k, wz * k);
+    const b = this.noodle[1].simplex3(wx * k, wy * k, wz * k);
+    return this.noodleAir(a, b, this.surfaceY(wx, wz), wy);
   }
 
   generate(req: VoxelChunkRequest): VoxelChunkResult {
@@ -186,40 +200,68 @@ export class VoxelGenerator {
     const H = Math.max(8, Math.ceil((top - MIN_Y) / 4) * 4);
     const LH = H / 4 + 1;
 
-    // 3) Coarse density lattice.
-    const lat = new Float32Array(LH * LW * LW);
+    // 3) Coarse density lattice. The two noodle noises are stored raw and only
+    //    combined per block in step 4: abs() and max() before interpolating
+    //    would lose most tubes, which are thinner than the lattice spacing.
+    const latSize = LH * LW * LW;
+    const lat = new Float32Array(latSize);
+    const noodles = v.caves.noodle.enabled;
+    const na = new Float32Array(noodles ? latSize : 0);
+    const nb = new Float32Array(noodles ? latSize : 0);
+    const nk = 1 / v.caves.noodle.scale;
     for (let ly = 0; ly < LH; ly++) {
       const wy = MIN_Y + ly * 4;
       for (let lz = 0; lz < LW; lz++) {
         for (let lx = 0; lx < LW; lx++) {
           const ci = lz * 4 * C + lx * 4;
-          lat[(ly * LW + lz) * LW + lx] = this.density(X0 + lx * 4, wy, Z0 + lz * 4, surf[ci], jag[ci]);
+          const wx = X0 + lx * 4;
+          const wz = Z0 + lz * 4;
+          const li = (ly * LW + lz) * LW + lx;
+          lat[li] = this.density(wx, wy, wz, surf[ci], jag[ci]);
+          if (noodles) {
+            na[li] = this.noodle[0].simplex3(wx * nk, wy * nk, wz * nk);
+            nb[li] = this.noodle[1].simplex3(wx * nk, wy * nk, wz * nk);
+          }
         }
       }
     }
 
-    // 4) Interpolate to blocks.
+    // Interpolation stays within a cell's corner values, so a tube can only pass
+    // through cells where the corner ranges of both noises reach [-radius, radius].
+    const tube = new Uint8Array(noodles ? latSize : 0);
+    if (noodles) {
+      const r = v.caves.noodle.radius;
+      for (let ly = 0; ly < LH - 1; ly++) {
+        for (let lz = 0; lz < LW - 1; lz++) {
+          for (let lx = 0; lx < LW - 1; lx++) {
+            const i = (ly * LW + lz) * LW + lx;
+            if (cellReaches(na, i, LW, LW * LW, r) && cellReaches(nb, i, LW, LW * LW, r)) tube[i] = 1;
+          }
+        }
+      }
+    }
+
+    // 4) Interpolate to blocks, then carve noodles from the interpolated noises.
     const blocks = new Uint8Array(GW * GW * H);
     for (let y = 0; y < H; y++) {
       const ly = y >> 2;
       const fy = (y & 3) * 0.25;
+      const wy = MIN_Y + y;
       for (let z = 0; z < GW; z++) {
         const lz = z >> 2;
         const fz = (z & 3) * 0.25;
-        const r00 = (ly * LW + lz) * LW;
-        const r01 = (ly * LW + lz + 1) * LW;
-        const r10 = ((ly + 1) * LW + lz) * LW;
-        const r11 = ((ly + 1) * LW + lz + 1) * LW;
+        const r0 = (ly * LW + lz) * LW;
+        const r1 = ((ly + 1) * LW + lz) * LW;
         for (let x = 0; x < GW; x++) {
-          const lx = x >> 2;
+          const i0 = r0 + (x >> 2);
+          const i1 = r1 + (x >> 2);
           const fx = (x & 3) * 0.25;
-          const a = lat[r00 + lx] + (lat[r00 + lx + 1] - lat[r00 + lx]) * fx;
-          const b = lat[r01 + lx] + (lat[r01 + lx + 1] - lat[r01 + lx]) * fx;
-          const c = lat[r10 + lx] + (lat[r10 + lx + 1] - lat[r10 + lx]) * fx;
-          const d = lat[r11 + lx] + (lat[r11 + lx + 1] - lat[r11 + lx]) * fx;
-          const lo = a + (b - a) * fz;
-          const hi = c + (d - c) * fz;
-          if (lo + (hi - lo) * fy > 0) blocks[(y * GW + z) * GW + x] = STONE;
+          if (trilinear(lat, i0, i1, LW, fx, fz, fy) <= 0) continue;
+          const sy = surf[z * C + x];
+          if (noodles && tube[i0] && sy - wy > 6 && this.noodleAir(trilinear(na, i0, i1, LW, fx, fz, fy), trilinear(nb, i0, i1, LW, fx, fz, fy), sy, wy)) {
+            continue;
+          }
+          blocks[(y * GW + z) * GW + x] = STONE;
         }
       }
     }
@@ -511,6 +553,28 @@ export class VoxelGenerator {
       }
     }
   }
+}
+
+/**
+ * Trilinear interpolation inside a lattice cell. i0 and i1 index the cell's
+ * lower and upper (y) corner rows at its smaller z; `row` is the z stride.
+ */
+function trilinear(g: Float32Array, i0: number, i1: number, row: number, fx: number, fz: number, fy: number): number {
+  const a = g[i0] + (g[i0 + 1] - g[i0]) * fx;
+  const b = g[i0 + row] + (g[i0 + row + 1] - g[i0 + row]) * fx;
+  const c = g[i1] + (g[i1 + 1] - g[i1]) * fx;
+  const d = g[i1 + row] + (g[i1 + row + 1] - g[i1 + row]) * fx;
+  const lo = a + (b - a) * fz;
+  const hi = c + (d - c) * fz;
+  return lo + (hi - lo) * fy;
+}
+
+/** Whether the 8 corner values of the lattice cell whose lower corner is at i reach into [-r, r]. */
+function cellReaches(g: Float32Array, i: number, row: number, plane: number, r: number): boolean {
+  const j = i + plane;
+  const lo = Math.min(g[i], g[i + 1], g[i + row], g[i + row + 1], g[j], g[j + 1], g[j + row], g[j + row + 1]);
+  const hi = Math.max(g[i], g[i + 1], g[i + row], g[i + row + 1], g[j], g[j + 1], g[j + row], g[j + row + 1]);
+  return lo <= r && hi >= -r;
 }
 
 function band(y: number): number {
