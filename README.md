@@ -4,6 +4,16 @@ Experiments in procedural world generation, inspired by Minecraft and No Man's S
 
 **Try it live: https://jjkramhoeft.github.io/worldgen/** (needs a browser with WebGL2).
 
+## How it was build
+
+Tree prompt to Claude Opus 5.5 on Max - total time 2 hours. The prompts were:
+
+* write a short markdown document describing how minecraft and No Man's Sky generate there game worlds
+
+* /goal make a demo app where I can test settings for procedural world generation. it should contain a visual 3d render with some movement and panning ability. make it feature rich. (read the minecraft-vs-no-mans-sky-worldgen.md for inspiration and do your own research)
+
+* /goal expand the help pop up - the current help is fine, but there need more text/explanation below. go into extensive details with the mathematics and algorithms. Do research if needed
+
 ## What's here
 
 | Path | Contents |
