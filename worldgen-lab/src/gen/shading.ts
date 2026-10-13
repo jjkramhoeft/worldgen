@@ -5,8 +5,15 @@
  */
 import { hexToRgb, mixRgb, sampleRamp, smoothstep, type RGB } from '../core/color';
 import { B, BIOME_GROUND_RGB, BIOME_RGB, BIOME_ROCK_RGB } from './biomes';
-import type { ColorMode, TerrainSettings, TerrainViewSettings } from './settings';
+import type { ColorMode, TerrainViewSettings } from './settings';
 import type { TerrainSample } from './terrain';
+
+/** The settings the shader reads (Terrain and Watershed settings both provide them). */
+export interface ShaderParams {
+  seaLevel: number;
+  verticalScale: number;
+  biomes: { snowLine: number };
+}
 
 const SNOW = hexToRgb('#f3f6f9');
 const UNDERWATER = hexToRgb('#28474f');
@@ -26,7 +33,7 @@ export class TerrainShader {
   private readonly tmp: RGB = [0, 0, 0];
 
   constructor(
-    private readonly t: TerrainSettings,
+    private readonly t: ShaderParams,
     private readonly mode: ColorMode,
     view: Pick<TerrainViewSettings, 'hueShift' | 'saturation'>,
   ) {

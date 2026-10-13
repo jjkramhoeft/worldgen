@@ -9,7 +9,18 @@
 import { Pane, type FolderApi, type ListBladeApi, type TabPageApi } from 'tweakpane';
 import * as EssentialsPlugin from '@tweakpane/plugin-essentials';
 import type { App, ChangeScope } from '../app/App';
-import { MODES, TERRAIN_PRESETS, COLOR_MODES, PLANET_TYPES, type ModeId, type ClimateNoise, type PlanetType } from '../gen/settings';
+import {
+  MODES,
+  TERRAIN_PRESETS,
+  WATERSHED_PRESETS,
+  COLOR_MODES,
+  WATERSHED_COLOR_MODES,
+  PLANET_TYPES,
+  type ModeId,
+  type ClimateNoise,
+  type DetailSettings,
+  type PlanetType,
+} from '../gen/settings';
 import { NOISE_KINDS } from '../core/noise';
 import { FRACTAL_KINDS } from '../core/fractal';
 import { systemPlanetCount } from '../gen/planet/universe';
@@ -19,8 +30,12 @@ type Container = FolderApi | TabPageApi;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-const ALL: ModeId[] = ['terrain', 'voxel', 'planet', 'erosion'];
+const ALL: ModeId[] = ['terrain', 'watershed', 'voxel', 'planet', 'erosion'];
+/** Modes built on the Terrain generator. */
 const FLAT: ModeId[] = ['terrain', 'voxel', 'erosion'];
+/** Modes with a sky over a flat world. */
+const SKY: ModeId[] = ['terrain', 'watershed', 'voxel', 'erosion'];
+const WS: ModeId[] = ['watershed'];
 
 const opts = <T extends string | number>(values: readonly T[], labels?: Record<string, string>) =>
   Object.fromEntries(values.map((v) => [labels?.[String(v)] ?? String(v), v]));
@@ -54,6 +69,7 @@ export class Panel {
     this.buildHeader();
     this.buildTerrainShape();
     this.buildTerrainView();
+    this.buildWatershed();
     this.buildVoxel();
     this.buildPlanet();
     this.buildErosion();
@@ -131,6 +147,14 @@ export class Panel {
     }) as ListBladeApi<number>;
     presets.on('change', (ev) => this.app.applyPreset(ev.value));
     this.sections.push({ item: presets, modes: FLAT });
+    const wsPresets = this.pane.addBlade({
+      view: 'list',
+      label: 'Preset',
+      options: WATERSHED_PRESETS.map((p, i) => ({ text: p.name, value: i })),
+      value: 0,
+    }) as ListBladeApi<number>;
+    wsPresets.on('change', (ev) => this.app.applyWatershedPreset(ev.value));
+    this.sections.push({ item: wsPresets, modes: WS });
   }
 
   // ───────────────────────────── terrain shape ─────────────────────────────
@@ -211,9 +235,14 @@ export class Panel {
   }
 
   private buildTerrainView(): void {
+    this.heightmapView('Terrain rendering', ['terrain'], this.app.settings.terrainView, COLOR_MODES);
+  }
+
+  /** LOD, water, vegetation and colouring of a heightmap world (Terrain and Watershed share `terrainView`). */
+  private heightmapView(title: string, modes: ModeId[], colorTarget: object, colors: readonly { value: string; label: string }[]): void {
     const v = this.app.settings.terrainView;
-    const f = this.folder(this.pane, 'Terrain rendering', ['terrain']);
-    this.bind(f, v, 'colorMode', { label: 'Color by', options: Object.fromEntries(COLOR_MODES.map((c) => [c.label, c.value])) });
+    const f = this.folder(this.pane, title, modes);
+    this.bind(f, colorTarget, 'colorMode', { label: 'Color by', options: Object.fromEntries(colors.map((c) => [c.label, c.value])) });
     this.num(f, v, 'viewDistance', 'View distance (m)', 500, 16000, 50);
     this.num(f, v, 'vertexSpacing', 'Finest spacing (m)', 0.25, 8, 0.25);
     this.bind(f, v, 'nodeResolution', { label: 'Node grid', options: { '32²': 32, '48²': 48, '64²': 64, '96²': 96, '128²': 128 } });
@@ -231,6 +260,78 @@ export class Panel {
     this.bind(veg, v.vegetation, 'enabled', { label: 'Enabled' });
     this.num(veg, v.vegetation, 'density', 'Density', 0, 3, 0.05);
     this.num(veg, v.vegetation, 'distance', 'Draw distance (m)', 100, 2500, 10, 'none');
+  }
+
+  // ───────────────────────────── watershed ─────────────────────────────
+
+  private buildWatershed(): void {
+    const w = this.app.settings.watershed;
+
+    const world = this.folder(this.pane, 'Continents', WS, true);
+    this.bind(world, w.regions, 'size', { label: 'Region size (m)', min: 16000, max: 128000, step: 1000 });
+    this.num(world, w.regions, 'landChance', 'Land chance', 0, 1, 0.01);
+    this.num(world, w.regions, 'jitter', 'Site jitter', 0, 1, 0.01);
+    this.num(world, w.regions, 'warp', 'Border warp (m)', 0, 15000, 100);
+    this.num(world, w.regions, 'warpScale', 'Warp wavelength (m)', 5000, 120000, 500);
+    this.num(world, w.coast, 'margin', 'Sea margin (m)', 1000, 20000, 100);
+    this.num(world, w.coast, 'setback', 'Coast setback (m)', 0, 40000, 100);
+    this.num(world, w.coast, 'scale', 'Coast wavelength (m)', 2000, 80000, 500);
+    this.num(world, w.coast, 'octaves', 'Coast octaves', 1, 10, 1);
+    this.num(world, w.coast, 'sizeVariation', 'Size variation', 0, 1, 0.01);
+    this.num(world, w, 'seaLevel', 'Sea level (m)', -50, 50, 0.5);
+    this.num(world, w, 'verticalScale', 'Vertical scale', 0.2, 3, 0.01);
+
+    const net = this.folder(this.pane, 'Drainage network', WS, true);
+    this.bind(net, w.network, 'grid', { label: 'Grid spacing', options: { '128 m': 128, '192 m': 192, '256 m': 256, '384 m': 384, '512 m': 512 } });
+    this.num(net, w.network, 'jitter', 'Growth jitter', 0, 0.9, 0.01);
+    this.num(net, w.network, 'mouthBias', 'Mouth bias', 0, 3, 0.01);
+    this.num(net, w.climate, 'runoff', 'Runoff (mm/yr)', 20, 2000, 10);
+    const rain = net.addFolder({ title: 'Rain noise', expanded: false });
+    this.climate(rain, w.climate.rain, 120000);
+
+    const relief = this.folder(this.pane, 'Relief (stream power)', WS);
+    this.num(relief, w.relief, 'k', 'Slope constant k', 0.005, 0.2, 0.001);
+    this.num(relief, w.relief, 'concavity', 'Concavity θ', 0.2, 0.8, 0.01);
+    this.num(relief, w.relief, 'minSlope', 'Min slope', 0.0001, 0.01, 0.0001);
+    this.num(relief, w.relief, 'maxSlope', 'Max slope', 0.2, 1.5, 0.01);
+    const uplift = relief.addFolder({ title: 'Uplift noise (mountain belts)', expanded: false });
+    this.climate(uplift, w.relief.uplift, 120000);
+    this.detailFolder(relief, w.relief.detail);
+
+    const rivers = this.folder(this.pane, 'Rivers & lakes', WS);
+    this.num(rivers, w.rivers, 'threshold', 'River starts at (km²)', 0.3, 40, 0.1);
+    this.num(rivers, w.rivers, 'width100', 'Width at 100 km² (m)', 2, 120, 0.5);
+    this.num(rivers, w.rivers, 'depth100', 'Depth at 100 km² (m)', 0.3, 12, 0.1);
+    this.num(rivers, w.rivers, 'floodplain', 'Floodplain (× width)', 0.5, 8, 0.1);
+    this.num(rivers, w.rivers, 'bank', 'Bank height (m)', 0.1, 5, 0.1);
+    this.num(rivers, w.rivers, 'meander', 'Meanders', 0, 2, 0.01);
+    this.bind(rivers, w.lakes, 'enabled', { label: 'Lakes' });
+    this.num(rivers, w.lakes, 'chance', 'Lake chance', 0, 1, 0.01);
+    this.num(rivers, w.lakes, 'radius', 'Lake radius (m)', 300, 8000, 50);
+
+    const bio = this.folder(this.pane, 'Climate & biomes', WS);
+    const temp = bio.addFolder({ title: 'Temperature noise', expanded: false });
+    this.climate(temp, w.climate.temperature, 200000);
+    this.bind(bio, w.biomes, 'mode', { label: 'Classifier', options: { 'Whittaker + wetlands': 'whittaker', 'Height bands': 'height' } });
+    this.num(bio, w.biomes, 'lapse', 'Cooling (m per unit)', 100, 3000, 10);
+    this.num(bio, w.biomes, 'beachHeight', 'Beach height (m)', 0, 15, 0.1);
+    this.num(bio, w.biomes, 'peakHeight', 'Peaks above (m)', 50, 1500, 1);
+    this.num(bio, w.biomes, 'snowLine', 'Snow line (m)', 50, 1500, 1);
+
+    this.heightmapView('Watershed rendering', WS, w, WATERSHED_COLOR_MODES);
+  }
+
+  private detailFolder(parent: Container, d: DetailSettings): void {
+    const detail = parent.addFolder({ title: 'Detail noise', expanded: false });
+    this.bind(detail, d, 'fractal', { label: 'Fractal', options: FRACTAL_OPTS });
+    this.bind(detail, d, 'noise', { label: 'Noise', options: NOISE_OPTS });
+    this.num(detail, d, 'amplitude', 'Amplitude (m)', 0, 200, 0.5);
+    this.num(detail, d, 'scale', 'Wavelength (m)', 10, 6000, 1);
+    this.num(detail, d, 'octaves', 'Octaves', 1, 12, 1);
+    this.num(detail, d, 'gain', 'Gain', 0.1, 0.9, 0.01);
+    this.num(detail, d, 'mountainBias', 'Mountain bias', 0, 1, 0.01);
+    this.num(detail, d, 'sharpness', 'Sharp ↔ round', -1, 1, 0.01);
+    this.num(detail, d, 'slopeErosion', 'Slope erosion', 0, 3, 0.01);
   }
 
   // ───────────────────────────── voxel ─────────────────────────────
@@ -468,7 +569,7 @@ export class Panel {
 
   private buildEnvironment(): void {
     const r = this.app.settings.render;
-    const sky = this.folder(this.pane, 'Sky & lighting', FLAT);
+    const sky = this.folder(this.pane, 'Sky & lighting', SKY);
     this.num(sky, r, 'timeOfDay', 'Time of day (h)', 0, 24, 0.05, 'render');
     this.bind(sky, r, 'dayCycle', { label: 'Day/night cycle' }, 'render');
     this.num(sky, r, 'dayLength', 'Day length (s)', 20, 1200, 5, 'render');

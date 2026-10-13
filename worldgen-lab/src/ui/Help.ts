@@ -20,6 +20,7 @@ export class Help {
         <h3>Worlds</h3>
         <table>
           <tr><td>⛰ Terrain</td><td>Infinite heightmap streamed as a quadtree of LOD tiles. Minecraft-style climate noise → splines → biomes, rivers, uber-noise detail, vegetation.</td></tr>
+          <tr><td>⋔ Watershed</td><td>River-first continents, one per 64 km region: river mouths → drainage network grown inland → heights from the sea upward → terrain fitted around rivers, floodplains and lakes. Every river flows downhill to the sea.</td></tr>
           <tr><td>▦ Voxel</td><td>Blocks from a 3D density field: overhangs, cheese / spaghetti / noodle caves, ores, trees, lava. Break and place blocks — edits are stored as deltas.</td></tr>
           <tr><td>◍ Planet</td><td>No Man's Sky style: galaxy seed → region → system → planet. Fly from orbit to the surface with continuous LOD.</td></tr>
           <tr><td>≋ Erosion</td><td>Watch droplet (hydraulic) and thermal erosion carve a finite map in real time.</td></tr>

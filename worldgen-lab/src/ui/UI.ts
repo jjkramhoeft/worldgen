@@ -132,7 +132,9 @@ export class UI {
   };
 
   toggleSplines(open = !this.splines.isOpen): void {
-    const flat = this.app.settings.mode !== 'planet';
+    // The spline editor shapes the Terrain generator (also used by Voxel and Erosion).
+    const mode = this.app.settings.mode;
+    const flat = mode !== 'planet' && mode !== 'watershed';
     this.splines.setOpen(open && flat);
     this.toolbar.sync(this.splines.isOpen);
   }
@@ -148,7 +150,7 @@ export class UI {
 
   onModeChanged(): void {
     this.panel.onModeChanged();
-    if (this.app.settings.mode === 'planet') this.splines.setOpen(false);
+    if (this.app.settings.mode === 'planet' || this.app.settings.mode === 'watershed') this.splines.setOpen(false);
     this.toolbar.sync(this.splines.isOpen);
     this.minimap.invalidate();
     if (this.map.isOpen) this.map.close();
@@ -214,7 +216,10 @@ export class UI {
       if (cam === 'fly') return `${locked ? '' : 'Click to steer · '}WASD thrust · Space/C up/down · Z/X roll · Shift boost · wheel speed ×${app.rig.speedScale.toFixed(2)} · Esc release`;
       return 'Drag to orbit · wheel to change altitude · F to fly down to the surface · M surface map · ◀ ▶ planets in the panel';
     }
-    if (cam === 'orbit') return 'Drag rotate · right-drag pan · wheel zoom · WASD glide · Q/E turn · M map · K splines · H help';
+    if (cam === 'orbit') {
+      const splines = app.settings.mode === 'watershed' ? '' : ' · K splines';
+      return `Drag rotate · right-drag pan · wheel zoom · WASD glide · Q/E turn · M map${splines} · H help`;
+    }
     if (cam === 'walk') {
       const base = `${locked ? '' : 'Click to look · '}WASD walk · Space jump/swim · Shift sprint`;
       return app.settings.mode === 'voxel' ? `${base} · LMB break · RMB place · 1–9 blocks · Esc release` : `${base} · Esc release`;

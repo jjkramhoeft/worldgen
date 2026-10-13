@@ -7,9 +7,33 @@ import { hash2i, unit, deriveSeed } from '../core/rng';
 import { Noise } from '../core/noise';
 import { hexToRgb, mixRgb, smoothstep, srgbToLinear, type RGB } from '../core/color';
 import { BIOMES, TREE_TYPES } from './biomes';
-import { emptySample, type TerrainGenerator } from './terrain';
-import type { TerrainShader } from './shading';
+import { emptySample, type TerrainSample } from './terrain';
 import type { TerrainViewSettings } from './settings';
+
+/**
+ * Anything that can be meshed as a heightfield: the Terrain generator, and the
+ * Watershed generator with its own water levels.
+ */
+export interface HeightfieldSource {
+  readonly seed: number;
+  readonly s: { seaLevel: number; verticalScale: number; biomes: { snowLine: number } };
+  /** True if samples carry their own water level in `water` (NaN = dry) instead of the sea plane. */
+  readonly waterField?: boolean;
+  /** True if samples carry a flow vector (`flowX`, `flowZ`) for the water surface. */
+  readonly flowField?: boolean;
+  createSample?(): TerrainSample;
+  sample(x: number, z: number, out: TerrainSample, spacing?: number): TerrainSample;
+  height(x: number, z: number, spacing?: number): number;
+  /** Extra per-vertex fields the shader needs, packed as `extraStride` floats per vertex. */
+  readonly extraStride?: number;
+  packExtra?(s: TerrainSample, out: Float32Array, offset: number): void;
+  unpackExtra?(src: Float32Array, offset: number, s: TerrainSample): void;
+}
+
+/** Colours a sample with surface normal y-component `ny`; returns sRGB. */
+export interface SurfaceShader {
+  color(s: TerrainSample, ny: number, out: RGB, lodLevel?: number): RGB;
+}
 
 export interface TerrainNodeRequest {
   x0: number;
@@ -26,7 +50,7 @@ export interface TerrainNodeResult {
   colors: Float32Array;
   minY: number;
   maxY: number;
-  water: { positions: Float32Array; colors: Float32Array } | null;
+  water: { positions: Float32Array; colors: Float32Array; maxY: number; flow?: Float32Array } | null;
   /** Stride 6: x, y, z, tree type index, scale, rotation. */
   veg: Float32Array | null;
   ms: number;
@@ -37,8 +61,8 @@ export const VEG_STRIDE = 6;
 const jitterNoise = new Noise(911);
 
 export function buildTerrainNode(
-  gen: TerrainGenerator,
-  shader: TerrainShader,
+  gen: HeightfieldSource,
+  shader: SurfaceShader,
   view: TerrainViewSettings,
   req: TerrainNodeRequest,
 ): TerrainNodeResult {
@@ -61,8 +85,12 @@ export function buildTerrainNode(
     humidity: new Float32Array(V),
     river: new Float32Array(V),
   };
+  const waterY = gen.waterField ? new Float32Array(V) : null;
+  const flow = gen.flowField ? new Float32Array(V * 2) : null;
+  const stride = gen.extraStride ?? 0;
+  const extra = stride > 0 ? new Float32Array(V * stride) : null;
 
-  const smp = emptySample();
+  const smp = gen.createSample?.() ?? emptySample();
   let minY = Infinity;
   let maxY = -Infinity;
   for (let j = 0; j < G; j++) {
@@ -83,6 +111,12 @@ export function buildTerrainNode(
         fields.temperature[v] = smp.temperature;
         fields.humidity[v] = smp.humidity;
         fields.river[v] = smp.river;
+        if (waterY) waterY[v] = smp.water ?? NaN;
+        if (flow) {
+          flow[v * 2] = smp.flowX ?? 0;
+          flow[v * 2 + 1] = smp.flowZ ?? 0;
+        }
+        if (extra) gen.packExtra!(smp, extra, v * stride);
         if (h < minY) minY = h;
         if (h > maxY) maxY = h;
       } else {
@@ -128,6 +162,7 @@ export function buildTerrainNode(
       smp.temperature = fields.temperature[v];
       smp.humidity = fields.humidity[v];
       smp.river = fields.river[v];
+      if (extra) gen.unpackExtra!(extra, v * stride, smp);
       shader.color(smp, ny, rgb, req.level);
       if (natural) {
         const wx = req.x0 + i * step;
@@ -159,24 +194,33 @@ export function buildTerrainNode(
   }
 
   let water: TerrainNodeResult['water'] = null;
-  if (view.water.enabled && minY < sea + 0.5) {
+  let wet = false;
+  if (waterY) for (let v = 0; v < V && !wet; v++) wet = !Number.isNaN(waterY[v]);
+  if (view.water.enabled && (waterY ? wet : minY < sea + 0.5)) {
     const wp = new Float32Array(V * 3);
     const wc = new Float32Array(V * 4);
     const shallow = linear(hexToRgb(view.water.shallowColor));
     const deep = linear(hexToRgb(view.water.deepColor));
     const c: RGB = [0, 0, 0];
+    let top = sea;
     for (let v = 0; v < V; v++) {
+      const ground = positions[v * 3 + 1];
+      // Rivers and lakes have their own level. Dry vertices sit at the sea plane,
+      // below their ground, so water triangles at the edges slide under the banks.
+      const level = waterY ? (Number.isNaN(waterY[v]) ? Math.min(sea, ground - 1) : waterY[v]) : sea;
+      if (level > top) top = level;
       wp[v * 3] = positions[v * 3];
-      wp[v * 3 + 1] = sea;
+      wp[v * 3 + 1] = level;
       wp[v * 3 + 2] = positions[v * 3 + 2];
-      const depth = sea - positions[v * 3 + 1];
+      const depth = level - ground;
       mixRgb(c, shallow, deep, smoothstep(0, 22, depth));
       wc[v * 4] = c[0];
       wc[v * 4 + 1] = c[1];
       wc[v * 4 + 2] = c[2];
       wc[v * 4 + 3] = 0.3 + (view.water.opacity - 0.3) * smoothstep(-0.5, 7, depth);
     }
-    water = { positions: wp, colors: wc };
+    water = { positions: wp, colors: wc, maxY: top };
+    if (flow) water.flow = flow;
   }
 
   const veg = req.vegetation && view.vegetation.enabled ? placeVegetation(gen, req, biome, normals, view.vegetation.density) : null;
@@ -248,7 +292,7 @@ export function gridIndex(N: number, skirt: boolean): Uint16Array | Uint32Array 
 const VEG_CELL = 6;
 
 function placeVegetation(
-  gen: TerrainGenerator,
+  gen: HeightfieldSource,
   req: TerrainNodeRequest,
   biome: Uint8Array,
   normals: Float32Array,
@@ -261,7 +305,7 @@ function placeVegetation(
   const sea = gen.s.seaLevel;
   const snowLine = gen.s.biomes.snowLine;
   const vs = gen.s.verticalScale;
-  const smp = emptySample();
+  const smp = gen.createSample?.() ?? emptySample();
   const gx0 = Math.floor(req.x0 / VEG_CELL);
   const gz0 = Math.floor(req.z0 / VEG_CELL);
   const gx1 = Math.floor((req.x0 + req.size) / VEG_CELL);
@@ -282,6 +326,8 @@ function placeVegetation(
       if (roll >= def.treeDensity * area * density || def.trees.length === 0) continue;
       const above = smp.height - sea;
       if (above < 0.4 || above > (snowLine + smp.temperature * 120) * vs + 10) continue;
+      // Keep plants out of rivers and lakes above sea level.
+      if (smp.water !== undefined && !Number.isNaN(smp.water) && smp.height < smp.water + 0.4) continue;
 
       let r = unit(hash2i(gx, gz, seed + 3)) * def.trees.reduce((s, t) => s + t.weight, 0);
       let type = def.trees[0].type;

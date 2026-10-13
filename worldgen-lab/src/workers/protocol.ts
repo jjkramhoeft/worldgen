@@ -15,6 +15,8 @@ export interface PlanetMapRequest {
 export interface JobPayloads {
   terrainNode: TerrainNodeRequest;
   map: MapRequest;
+  watershedNode: TerrainNodeRequest;
+  watershedMap: MapRequest;
   voxelChunk: VoxelChunkRequest;
   planetNode: PlanetNodeRequest;
   planetMap: PlanetMapRequest;
@@ -23,6 +25,8 @@ export interface JobPayloads {
 export interface JobResults {
   terrainNode: TerrainNodeResult;
   map: MapResult;
+  watershedNode: TerrainNodeResult;
+  watershedMap: MapResult;
   voxelChunk: VoxelChunkResult;
   planetNode: PlanetNodeResult;
   planetMap: { pixels: Uint8ClampedArray; rowStart: number; rowEnd: number };

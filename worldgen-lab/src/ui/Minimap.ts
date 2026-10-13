@@ -5,11 +5,11 @@
  */
 import * as THREE from 'three';
 import type { App } from '../app/App';
-import { HIST_BINS, MAP_LAYERS, type MapLayer } from '../gen/map';
+import { HIST_BINS, MAP_LAYERS, WATERSHED_MAP_LAYERS, type MapLayer } from '../gen/map';
 import { h } from './dom';
 
 const RES = 192;
-const EXTENTS = [512, 1024, 2048, 4096, 8192, 16384, 32768];
+const EXTENTS = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072];
 
 export class Minimap {
   readonly root: HTMLElement;
@@ -21,19 +21,23 @@ export class Minimap {
   layer: MapLayer = 'shaded';
   private rendered = { x: NaN, z: NaN, version: -1, layer: '', extent: 0, mode: '' };
   private pending = false;
+  private layersFor = '';
+  /** Zoom level per world family (Watershed continents need a wider view). */
+  private readonly zoom = { terrain: 2, watershed: 6 };
   /** Called with the latest continentalness / erosion / PV histograms. */
   onHistograms: ((h: Uint32Array) => void) | null = null;
 
   constructor(private readonly app: App) {
     this.image.width = RES;
     this.image.height = RES;
-    for (const l of MAP_LAYERS) this.select.append(h('option', { text: l.label, attrs: { value: l.value } }));
+    this.syncLayers();
     this.select.addEventListener('change', () => {
       this.layer = this.select.value as MapLayer;
       this.invalidate();
     });
     const zoom = (d: number) => {
       this.extentIndex = THREE.MathUtils.clamp(this.extentIndex + d, 0, EXTENTS.length - 1);
+      this.zoom[this.family()] = this.extentIndex;
       this.invalidate();
     };
     const frame = h('div', { class: 'frame' }, this.canvas);
@@ -61,6 +65,22 @@ export class Minimap {
     this.rendered.version = -1;
   }
 
+  private family(): 'terrain' | 'watershed' {
+    return this.app.settings.mode === 'watershed' ? 'watershed' : 'terrain';
+  }
+
+  /** Watershed mode has its own layers and zoom. */
+  private syncLayers(): void {
+    const fam = this.family();
+    if (fam === this.layersFor) return;
+    this.layersFor = fam;
+    this.extentIndex = this.zoom[fam];
+    const layers = fam === 'watershed' ? WATERSHED_MAP_LAYERS : MAP_LAYERS;
+    this.select.replaceChildren(...layers.map((l) => h('option', { text: l.label, attrs: { value: l.value } })));
+    if (!layers.some((l) => l.value === this.layer)) this.layer = 'shaded';
+    this.select.value = this.layer;
+  }
+
   private center(): THREE.Vector3 {
     return this.app.rig.mode === 'orbit' ? this.app.rig.orbit.target : this.app.camera.position;
   }
@@ -70,6 +90,7 @@ export class Minimap {
     const visible = this.app.settings.render.minimap && mode !== 'erosion';
     this.root.style.display = visible ? '' : 'none';
     if (!visible) return;
+    this.syncLayers();
     this.root.classList.toggle('planet', mode === 'planet');
     const wantH = mode === 'planet' ? RES : RES * 2;
     if (this.canvas.height !== wantH) this.canvas.height = wantH;
@@ -114,7 +135,7 @@ export class Minimap {
         const strips = await Promise.all(
           [0, 1].map((k) =>
             this.app.pool.run(
-              'map',
+              mode === 'watershed' ? 'watershedMap' : 'map',
               {
                 x0: cx - extent / 2,
                 z0: cz - extent / 2,
@@ -140,7 +161,7 @@ export class Minimap {
           ctx.putImageData(new ImageData(new Uint8ClampedArray(s.result.pixels), RES, rows), 0, s.result.rowStart);
           if (s.result.hist) for (let i = 0; i < hist.length; i++) hist[i] += s.result.hist[i];
         }
-        this.onHistograms?.(hist);
+        if (mode !== 'watershed') this.onHistograms?.(hist);
       }
       this.rendered = { x: cx, z: cz, version, layer, extent, mode };
     } catch (e) {

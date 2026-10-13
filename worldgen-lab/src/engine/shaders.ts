@@ -106,9 +106,16 @@ export function createSkyMaterial(): THREE.ShaderMaterial {
  * sky reflection, a sun glint and animated wave normals. With `planet` set,
  * "up" is the radial direction from uCenter.
  */
-export function createWaterMaterial(planet = false): THREE.ShaderMaterial {
+/**
+ * Water surface material. `flow` adds a per-vertex `waterFlow` attribute (downstream
+ * direction × speed) whose ripples drift downstream — used by the Watershed rivers.
+ */
+export function createWaterMaterial(planet = false, flow = false): THREE.ShaderMaterial {
+  const defines: Record<string, string> = {};
+  if (planet) defines.PLANET = '';
+  if (flow) defines.FLOW = '';
   return new THREE.ShaderMaterial({
-    name: planet ? 'PlanetOcean' : 'Water',
+    name: planet ? 'PlanetOcean' : flow ? 'RiverWater' : 'Water',
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
       {
@@ -121,15 +128,22 @@ export function createWaterMaterial(planet = false): THREE.ShaderMaterial {
         uWaveScale: { value: planet ? 2.5 : 1 },
       },
     ]),
-    defines: planet ? { PLANET: '' } : {},
+    defines,
     vertexShader: /* glsl */ `
       attribute vec4 waterColor;
       varying vec4 vColor;
       varying vec3 vWorldPos;
+      #ifdef FLOW
+      attribute vec2 waterFlow;
+      varying vec2 vFlow;
+      #endif
       #include <common>
       #include <fog_pars_vertex>
       void main() {
         vColor = waterColor;
+        #ifdef FLOW
+        vFlow = waterFlow;
+        #endif
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos = wp.xyz;
         vec4 mvPosition = viewMatrix * wp;
@@ -141,6 +155,9 @@ export function createWaterMaterial(planet = false): THREE.ShaderMaterial {
       uniform vec3 uSunDir, uSunColor, uSkyColor, uCenter;
       varying vec4 vColor;
       varying vec3 vWorldPos;
+      #ifdef FLOW
+      varying vec2 vFlow;
+      #endif
       #include <common>
       #include <fog_pars_fragment>
       float whash(vec2 p) {
@@ -187,6 +204,20 @@ export function createWaterMaterial(planet = false): THREE.ShaderMaterial {
         // Fade the wave normals with distance: far away they would only alias into moiré.
         float dist = length(cameraPosition - vWorldPos);
         vec3 g = waveGrad(vWorldPos) * (1.0 / (1.0 + dist * 0.012 / uWaveScale));
+        #ifdef FLOW
+        // River ripples: noise stretched across the current and carried downstream.
+        float sp = length(vFlow);
+        if (sp > 0.01) {
+          vec2 dir = vFlow / sp;
+          vec2 side = vec2(-dir.y, dir.x);
+          vec2 q = vec2(dot(vWorldPos.xz, dir) - uTime * (0.8 + 1.6 * sp), dot(vWorldPos.xz, side) * 2.2) * 0.42;
+          float e = 0.35;
+          float gu = wnoise(q + vec2(e, 0.0)) - wnoise(q - vec2(e, 0.0));
+          float gv = wnoise(q + vec2(0.0, e)) - wnoise(q - vec2(0.0, e));
+          vec2 fg = (dir * gu + side * gv * 2.2) * (0.16 * clamp(sp, 0.0, 1.5)) / (1.0 + dist * 0.01);
+          g += vec3(fg.x, 0.0, fg.y);
+        }
+        #endif
         g -= up * dot(g, up);
         vec3 N = normalize(up - g);
         vec3 V = normalize(cameraPosition - vWorldPos);

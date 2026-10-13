@@ -22,6 +22,11 @@ export interface TerrainSample extends ClimateSample {
   biome: number;
   /** Mountain factor from the erosion spline (0 … 1). */
   mountain: number;
+  /** Water surface height (NaN = dry), for generators whose water is not just the sea plane. */
+  water?: number;
+  /** Downstream direction × speed of flowing water (rivers), if the generator has it. */
+  flowX?: number;
+  flowZ?: number;
 }
 
 const SOFT = 0.08;

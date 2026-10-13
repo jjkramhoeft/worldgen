@@ -31,11 +31,18 @@ export function sharedGridIndex(res: number, skirt: boolean): THREE.BufferAttrib
 
 const VEG_MAX_NODE = 256;
 
-class TerrainLod extends QuadtreeLod<TDesc, TerrainNodeResult> {
+/** The heightmap quadtree, shared by Terrain mode and Watershed mode (they differ in the worker job). */
+export class TerrainLod extends QuadtreeLod<TDesc, TerrainNodeResult> {
   constructor(
     private readonly app: App,
     private readonly material: THREE.Material,
     private readonly water: THREE.Material,
+    private readonly kind: 'terrainNode' | 'watershedNode' = 'terrainNode',
+    /** Height range assumed for nodes that have no mesh yet. */
+    private readonly range: () => [number, number] = () => {
+      const vs = app.settings.terrain.verticalScale;
+      return [-60 * vs, 260 * vs];
+    },
   ) {
     super();
   }
@@ -87,9 +94,9 @@ class TerrainLod extends QuadtreeLod<TDesc, TerrainNodeResult> {
     const cam = this.app.camera.position;
     const x0 = d.ix * d.size;
     const z0 = d.iz * d.size;
-    const vs = this.app.settings.terrain.verticalScale;
-    const lo = node && !Number.isNaN(node.minH) ? node.minH : -60 * vs;
-    const hi = node && !Number.isNaN(node.maxH) ? node.maxH : 260 * vs;
+    const [lo0, hi0] = this.range();
+    const lo = node && !Number.isNaN(node.minH) ? node.minH : lo0;
+    const hi = node && !Number.isNaN(node.maxH) ? node.maxH : hi0;
     const dx = Math.max(x0 - cam.x, 0, cam.x - (x0 + d.size));
     const dz = Math.max(z0 - cam.z, 0, cam.z - (z0 + d.size));
     const dy = Math.max(lo - cam.y, 0, cam.y - hi);
@@ -106,7 +113,7 @@ class TerrainLod extends QuadtreeLod<TDesc, TerrainNodeResult> {
 
   protected request(d: TDesc, node: LodNode<TDesc>, valid: () => boolean) {
     return this.app.pool.run(
-      'terrainNode',
+      this.kind,
       {
         x0: d.ix * d.size,
         z0: d.iz * d.size,
@@ -145,9 +152,10 @@ class TerrainLod extends QuadtreeLod<TDesc, TerrainNodeResult> {
       const wg = new THREE.BufferGeometry();
       wg.setAttribute('position', new THREE.BufferAttribute(r.water.positions, 3));
       wg.setAttribute('waterColor', new THREE.BufferAttribute(r.water.colors, 4));
+      if (r.water.flow) wg.setAttribute('waterFlow', new THREE.BufferAttribute(r.water.flow, 2));
       wg.setIndex(sharedGridIndex(res, false));
       wg.userData.sharedIndex = true;
-      wg.boundingBox = new THREE.Box3(new THREE.Vector3(0, r.minY, 0), new THREE.Vector3(d.size, this.app.settings.terrain.seaLevel + 1, d.size));
+      wg.boundingBox = new THREE.Box3(new THREE.Vector3(0, r.minY, 0), new THREE.Vector3(d.size, r.water.maxY + 1, d.size));
       wg.boundingSphere = wg.boundingBox.getBoundingSphere(new THREE.Sphere());
       const wm = new THREE.Mesh(wg, this.water);
       wm.matrixAutoUpdate = false;

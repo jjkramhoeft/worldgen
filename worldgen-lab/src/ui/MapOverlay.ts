@@ -5,7 +5,7 @@
  */
 import type { App } from '../app/App';
 import { BIOMES } from '../gen/biomes';
-import { MAP_LAYERS, type MapLayer } from '../gen/map';
+import { MAP_LAYERS, WATERSHED_MAP_LAYERS, type MapLayer } from '../gen/map';
 import { RAMPS, rgbToHex } from '../core/color';
 import { h } from './dom';
 
@@ -30,12 +30,13 @@ export class MapOverlay {
   private token = 0;
   private renderTimer = 0;
   private drag: { x: number; y: number; cx: number; cz: number; moved: boolean } | null = null;
+  private layersFor = '';
   isOpen = false;
 
   constructor(private readonly app: App) {
     this.image.width = R;
     this.image.height = R;
-    for (const l of MAP_LAYERS) this.layerSelect.append(h('option', { text: l.label, attrs: { value: l.value } }));
+    this.syncLayers();
     this.layerSelect.addEventListener('change', () => {
       this.layer = this.layerSelect.value as MapLayer;
       this.render();
@@ -107,8 +108,22 @@ export class MapOverlay {
     return this.app.settings.mode === 'planet';
   }
 
+  /** Fills the layer list for the current mode (Watershed has its own layers). */
+  private syncLayers(): void {
+    const mode = this.app.settings.mode === 'watershed' ? 'watershed' : 'terrain';
+    if (mode === this.layersFor) return;
+    this.layersFor = mode;
+    // Watershed continents are tens of kilometres across: start zoomed out.
+    this.mpp = mode === 'watershed' ? 96 : 8;
+    const layers = mode === 'watershed' ? WATERSHED_MAP_LAYERS : MAP_LAYERS;
+    this.layerSelect.replaceChildren(...layers.map((l) => h('option', { text: l.label, attrs: { value: l.value } })));
+    if (!layers.some((l) => l.value === this.layer)) this.layer = 'shaded';
+    this.layerSelect.value = this.layer;
+  }
+
   open(): void {
     if (this.app.settings.mode === 'erosion') return;
+    this.syncLayers();
     this.isOpen = true;
     this.root.classList.add('open');
     this.rendered.valid = false;
@@ -190,7 +205,7 @@ export class MapOverlay {
       }
       return this.app.pool
         .run(
-          'map',
+          this.app.settings.mode === 'watershed' ? 'watershedMap' : 'map',
           {
             x0: view.cx - (R / 2) * view.mpp,
             z0: view.cz - (R / 2) * view.mpp,
@@ -299,15 +314,7 @@ export class MapOverlay {
       this.readout.textContent = `lat ${lat.toFixed(1)}°  lon ${lon.toFixed(1)}°\nelevation  ${s.elevation.toFixed(3)}\ntemperature ${s.temperature.toFixed(2)}\nhumidity   ${s.humidity.toFixed(2)}`;
       return;
     }
-    const s = this.app.sampleTerrain(x, z);
-    this.readout.textContent =
-      `x ${x.toFixed(0)}  z ${z.toFixed(0)}\n` +
-      `${BIOMES[s.biome].name}\n` +
-      `height      ${s.height.toFixed(1)} m\n` +
-      `continent.  ${s.continentalness.toFixed(3)}\n` +
-      `erosion     ${s.erosion.toFixed(3)}\n` +
-      `weird / PV  ${s.weirdness.toFixed(2)} / ${s.pv.toFixed(2)}\n` +
-      `temp / hum  ${s.temperature.toFixed(2)} / ${s.humidity.toFixed(2)}`;
+    this.readout.textContent = this.app.mapReadout(x, z);
   }
 
   private updateLegend(lo: number, hi: number): void {
@@ -324,9 +331,29 @@ export class MapOverlay {
       }
       return;
     }
-    const ramp = this.layer === 'humidity' ? RAMPS.humidity : this.layer === 'height' ? RAMPS.viridis : this.layer === 'river' ? RAMPS.water : RAMPS.diverging;
+    if (this.layer === 'basins') {
+      this.legend.append(h('div', { text: 'Each colour is one drainage basin: all the land that drains to one river mouth. Rivers are drawn in blue.' }));
+      return;
+    }
+    const watershed = this.app.settings.mode === 'watershed';
+    const ramp =
+      this.layer === 'humidity' || this.layer === 'rain'
+        ? RAMPS.humidity
+        : this.layer === 'height' || this.layer === 'order' || this.layer === 'discharge'
+          ? RAMPS.viridis
+          : this.layer === 'river'
+            ? RAMPS.water
+            : RAMPS.diverging;
     const stops = ramp.map((c, i) => `${rgbToHex(c)} ${(i / (ramp.length - 1)) * 100}%`).join(',');
-    const [a, b] = this.layer === 'height' ? ['−80 m', '340 m'] : this.layer === 'river' ? ['0', '1'] : ['−1', '+1'];
+    const ranges: Partial<Record<MapLayer, [string, string]>> = {
+      height: watershed ? ['−40 m', '720 m'] : ['−80 m', '340 m'],
+      river: ['0', '1'],
+      order: ['order 1', 'order 7'],
+      discharge: ['0.06 km²', '1000 km² (log)'],
+      uplift: ['plains', 'mountain belts'],
+      rain: ['×0.4', '×1.6'],
+    };
+    const [a, b] = ranges[this.layer] ?? ['−1', '+1'];
     this.legend.append(
       h('div', { style: `height:12px;border-radius:4px;background:linear-gradient(90deg,${stops})` }),
       h('div', { style: 'display:flex;justify-content:space-between;color:var(--faint)' }, h('span', { text: a }), h('span', { text: b })),

@@ -4,11 +4,12 @@ An interactive sandbox for **procedural world generation**. Tweak any parameter 
 
 **Try it live: https://jjkramhoeft.github.io/worldgen/** (needs a browser with WebGL2). The site is rebuilt and redeployed by GitHub Actions on every push to `main`.
 
-There are four world types:
+There are five world types:
 
 | Mode | What it shows |
 |---|---|
 | ⛰ **Terrain** | An infinite heightmap world in the style of Minecraft 1.18+. Climate noise feeds the shaping splines, which drive biomes, rivers, uber-noise detail, water and vegetation. It streams as a quadtree of level-of-detail tiles. |
+| ⋔ **Watershed** | A river-first world: an endless ocean with one continent per 64 km region. Each continent gets its river mouths first, then a drainage network grown inland, heights from the sea upward, and only then the terrain around its rivers, floodplains and lakes. Every river flows downhill to the sea, at its own water level. |
 | ▦ **Voxel** | A Minecraft-like block world built from a 3D density field: overhangs, cheese, spaghetti and noodle caves, lava, ores, surface rules (with deepslate and terracotta bands) and trees. You can break and place blocks; edits are stored as *deltas*. |
 | ◍ **Planet** | No Man's Sky-style planets derived from a galaxy seed (region → star system → planet). You can fly from orbit down to the surface with continuous LOD. Planets have oceans (water or lava), an atmosphere, clouds, rings, moons and a day cycle. |
 | ≋ **Erosion** | Hydraulic (droplet) and thermal erosion running live on a finite map, so you can watch valleys, river networks and sediment fans form. |
@@ -39,7 +40,7 @@ npm test
 npm run build
 ```
 
-- `npm test` runs the unit tests. They check noise ranges and derivatives, terrain continuity for every preset, splines, the settings helpers and planet determinism.
+- `npm test` runs the unit tests. They check noise ranges and derivatives, terrain continuity for every preset, splines, the settings helpers, planet determinism, and the Watershed guarantees: every node drains to an outlet, water never rises downstream, rivers never cross, banks stay above the water, and the surface is continuous and LOD-independent.
 - `npm run build` type-checks and makes a static production build in `dist/`. You can serve that folder with any static server.
 
 The app needs a browser with WebGL2: any current Chrome, Edge, Firefox or Safari.
@@ -103,6 +104,20 @@ Each quadtree tile is a 64² grid with a one-sample border, so normals are seaml
 
 Coarse tiles pass their vertex spacing to the generator. Noise octaves finer than the Nyquist limit (`1 / (2·spacing)`) fade out and are then skipped. This is how CDLOD-style terrain and No Man's Sky avoid distant terrain turning into aliased spikes, and it also makes far tiles cheaper to build. The 2D map and the planets use the same mechanism.
 
+### Watershed worlds
+
+`src/gen/watershed/*` builds the land **rivers first**, after Génevaux et al. (2013) and Derzapf et al. (2011). The design is in [docs/WATERSHED-MODE.md](docs/WATERSHED-MODE.md).
+
+1. **Regions.** One jittered site per 64 km lattice cell, looked up through a domain warp. The coast function `L = f·b − margin − setback·n` (with `b` the exact distance to the Voronoi border) puts one continent strictly inside every land region, so each region is a complete drainage system that can be built on its own.
+2. **Network.** On a 256 m node grid, land nodes next to the sea become outlets, and a shortest-path forest grows inland from all of them (cost `|ab|·U·(1 ± jitter)`, so rivers follow low uplift). Every node gets one receiver; a diagonal step that would cross another river edge is refused.
+3. **Area and order.** Rain-weighted areas accumulate downstream; rivers start at 3 km², with Strahler orders and discharge from the runoff.
+4. **Heights from the sea upward.** `h = h_receiver + ℓ·clamp(k·U·A^−θ)`, the steady state of the stream power law: gentle big rivers, steep headwaters, ridges between basins, and no pits.
+5. **Lakes.** Flat river nodes become sills; the lake floods the sill's upstream subtree, and a rim guard raises any lower neighbour so the lake spills only over its sill.
+6. **River curves.** Reaches become Catmull–Rom curves with irregular sine-generated meanders; width and depth follow `A^0.5` and `A^0.4`.
+7. **Surface.** A Catmull–Rom interpolation of the node heights plus detail noise, shaped by every nearby river: a flat floodplain, levees wherever the ground was below the water, and a parabolic channel, all combined with min/max so the surface stays continuous.
+
+Each sample carries its own water level, so rivers slope downhill and lakes sit above the sea; the water shader moves its ripples downstream. Far tiles widen big channels and drop channels they cannot resolve. A region builds in about 0.2 s in a worker and is cached; a sample costs about 3 µs.
+
 ### Voxels
 
 `src/gen/voxel/voxelGen.ts` evaluates density on a coarse 4×4×4 lattice and interpolates it trilinearly. Minecraft uses 4×8×4 cells.
@@ -152,16 +167,19 @@ src/
              fractal (fBm/billow/ridged/IQ/uber + LOD octave fading) · spline · color
   gen/       settings (model, presets, share links) · terrain · biomes · shading
              terrainMesh · map · erosion · voxel/* · planet/*
+             watershed/ (regions · fields · network · watershedGen · shading · map)
   workers/   gen.worker (tiles, chunks, planet nodes, maps) · erosion.worker · protocol
   engine/    WorkerPool (priority queue) · QuadtreeLod (generic LOD) · Environment
              (sky, sun/moon, fog, clouds, shadows) · CameraRig · shaders
-  modes/     TerrainMode · VoxelMode · PlanetMode · ErosionMode · Vegetation
+  modes/     TerrainMode · WatershedMode · VoxelMode · PlanetMode · ErosionMode · Vegetation
   ui/        Panel (Tweakpane) · Toolbar · Hud · Minimap · MapOverlay · SplineEditor · Help
              helpDocs (the "How it works" chapters, typeset with KaTeX, loaded on first open)
              helpFigures (live plots, images and tables computed by the generator code)
   app/App.ts settings flow, modes, exports, frame loop
-tests/       noise and terrain tests (Vitest)
+tests/       noise, terrain, voxel and watershed tests (Vitest)
 docs/        RESEARCH.md — the research notes behind the algorithms, with sources
+             RIVERS-AND-ROADS.md — research on rivers, roads and settlements
+             WATERSHED-MODE.md — the design of the Watershed mode
 ```
 
 **Settings flow.** The panel binds directly to one plain settings object. Generation changes bump a version number, publish a snapshot to the workers and invalidate the active world. Tiles regenerate nearest first while the old ones stay visible.
@@ -188,9 +206,22 @@ Settings persist in `localStorage`. **Share** encodes the difference from the de
 | Eroded Highlands (IQ) | Derivative-damped fBm: gullies and smooth valleys. |
 | Alien World (NMS-ish) | Uber noise with feature amplification, terraces and a hue-shifted palette. |
 
+The Watershed mode has its own presets, all with 64 km regions:
+
+| Preset | Idea |
+|---|---|
+| Temperate continents (default) | Mountain belts, branching rivers and a few lakes. |
+| Highlands | Strong uplift: deep valleys, mountain lakes and snowy ranges. |
+| Lowland plains | Gentle relief, wide floodplains and strongly meandering rivers. |
+| Archipelago | Ragged coasts that break up into islands, each with its own rivers. |
+| Great rivers | Few, long rivers with wide channels in a wet climate. |
+| Arid | Deserts and savanna, thin rivers, rare lakes. |
+
 ---
 
 ## Notes and limitations
+
+- Watershed continents never cross region borders: each 64 km region holds at most one continent, surrounded by its own sea. A region's network takes about 0.2 s to build; the main thread builds the camera's region once (a short hitch on the first visit), and every worker builds the regions it needs.
 
 - Minecraft numbers (thresholds, PV fold, spline anchors, cell sizes) come from the vanilla data and decompiled code summarized in `docs/RESEARCH.md`. The terrain is *inspired by* Minecraft, not a bit-exact clone: it uses simplex noise and simplified splines.
 - No Man's Sky's exact formulas are not public. The uber noise here is a reconstruction that uses the game's parameter names; see the research notes.

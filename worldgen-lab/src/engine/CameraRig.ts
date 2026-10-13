@@ -15,6 +15,8 @@ export interface RigHooks {
   /** Ground height for flat worlds. */
   ground?: (x: number, z: number) => number;
   waterLevel?: number;
+  /** Water surface at a point (NaN = dry), for worlds whose rivers and lakes sit above sea level. */
+  waterAt?: (x: number, z: number) => number;
   /** Voxel collision. */
   solid?: (x: number, y: number, z: number) => boolean;
   /** Planet: centre, radius and the surface radius in a given direction. */
@@ -166,9 +168,18 @@ export class CameraRig {
     if (this.mode === 'orbit') this.orbit.update();
   }
 
+  /** Water surface at (x, z), or −Infinity where there is none. */
+  private water(x: number, z: number): number {
+    if (this.hooks.waterAt) {
+      const w = this.hooks.waterAt(x, z);
+      return Number.isNaN(w) ? -Infinity : w;
+    }
+    return this.hooks.waterLevel ?? -Infinity;
+  }
+
   /** Moves the view to look at a ground point, keeping the current viewing offset. */
   teleport(x: number, z: number): void {
-    const g = this.hooks.ground ? Math.max(this.hooks.ground(x, z), this.hooks.waterLevel ?? -Infinity) : 0;
+    const g = this.hooks.ground ? Math.max(this.hooks.ground(x, z), this.water(x, z)) : 0;
     if (this.mode === 'orbit') {
       const offset = this.v1.copy(this.camera.position).sub(this.orbit.target);
       this.orbit.target.set(x, g, z);
@@ -231,7 +242,7 @@ export class CameraRig {
     }
     const ground = this.hooks.ground;
     if (ground) {
-      const g = Math.max(ground(target.x, target.z), this.hooks.waterLevel ?? -Infinity);
+      const g = Math.max(ground(target.x, target.z), this.water(target.x, target.z));
       const dy = (g - target.y) * Math.min(1, dt * 4);
       target.y += dy;
       this.camera.position.y += dy;
@@ -289,7 +300,7 @@ export class CameraRig {
         const d = ahead * Math.max(40, speed);
         targetY = Math.max(targetY, ground(p.x + fwd.x * d, p.z + fwd.z * d));
       }
-      targetY = Math.max(targetY, this.hooks.waterLevel ?? -Infinity) + s.autopilotAltitude;
+      targetY = Math.max(targetY, this.water(p.x, p.z)) + s.autopilotAltitude;
       p.y += (targetY - p.y) * (1 - Math.exp(-dt * 0.9));
       const wantPitch = -0.16 + THREE.MathUtils.clamp((targetY - p.y) * 0.004, -0.2, 0.2);
       this.pitch += (wantPitch - this.pitch) * Math.min(1, dt * 1.5);
@@ -307,8 +318,7 @@ export class CameraRig {
     const right = this.v2.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const wish = this.v3.set(0, 0, 0).addScaledVector(fwd, az).addScaledVector(right, ax);
     const p = this.camera.position;
-    const water = this.hooks.waterLevel;
-    this.inWater = water !== undefined && p.y - EYE * 0.6 < water;
+    this.inWater = p.y - EYE * 0.6 < this.water(p.x, p.z);
     if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(s.walkSpeed * sprint * this.speedScale * (this.inWater ? 0.6 : 1));
     const k = 1 - Math.exp(-dt * (this.onGround ? 12 : 3));
     this.vel.x += (wish.x - this.vel.x) * k;

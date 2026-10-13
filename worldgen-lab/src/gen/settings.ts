@@ -7,9 +7,10 @@ import type { NoiseKind } from '../core/noise';
 import type { SplinePoint } from '../core/spline';
 import type { BiomeMode } from './biomes';
 
-export type ModeId = 'terrain' | 'voxel' | 'planet' | 'erosion';
+export type ModeId = 'terrain' | 'watershed' | 'voxel' | 'planet' | 'erosion';
 export const MODES: { id: ModeId; label: string; icon: string; blurb: string }[] = [
   { id: 'terrain', label: 'Terrain', icon: '⛰', blurb: 'Infinite heightmap world with LOD, biomes, rivers and vegetation' },
+  { id: 'watershed', label: 'Watershed', icon: '⋔', blurb: 'River-first continents: every river runs downhill to the sea' },
   { id: 'voxel', label: 'Voxel', icon: '▦', blurb: 'Minecraft-style blocks: 3D density, caves, ores, trees, editable' },
   { id: 'planet', label: 'Planet', icon: '◍', blurb: "No Man's Sky style planets from a galaxy seed, with continuous LOD" },
   { id: 'erosion', label: 'Erosion', icon: '≋', blurb: 'Hydraulic + thermal erosion simulation on a finite map' },
@@ -207,6 +208,116 @@ export interface ErosionSettings {
   autoRun: boolean;
 }
 
+export type WatershedColorMode =
+  | 'natural'
+  | 'biome'
+  | 'height'
+  | 'slope'
+  | 'basins'
+  | 'order'
+  | 'discharge'
+  | 'uplift'
+  | 'rain'
+  | 'temperature'
+  | 'humidity'
+  | 'river'
+  | 'lod';
+
+export const WATERSHED_COLOR_MODES: { value: WatershedColorMode; label: string }[] = [
+  { value: 'natural', label: 'Natural' },
+  { value: 'biome', label: 'Biome map colors' },
+  { value: 'height', label: 'Height' },
+  { value: 'slope', label: 'Slope' },
+  { value: 'basins', label: 'Drainage basins' },
+  { value: 'order', label: 'Stream order' },
+  { value: 'discharge', label: 'Upstream area' },
+  { value: 'uplift', label: 'Uplift' },
+  { value: 'rain', label: 'Rain' },
+  { value: 'temperature', label: 'Temperature' },
+  { value: 'humidity', label: 'Humidity' },
+  { value: 'river', label: 'Rivers' },
+  { value: 'lod', label: 'LOD level' },
+];
+
+/** The river-first world (docs/WATERSHED-MODE.md): one continent per region, rivers grown inland from the coast. */
+export interface WatershedSettings {
+  seaLevel: number;
+  verticalScale: number;
+  regions: {
+    /** Lattice spacing R (m); every land region holds one continent. */
+    size: number;
+    /** Site jitter, as a fraction of R. */
+    jitter: number;
+    /** Domain warp applied before the region lookup (m) and its wavelength. */
+    warp: number;
+    warpScale: number;
+    /** Share of regions that hold a continent; the rest are open ocean. */
+    landChance: number;
+  };
+  coast: {
+    /** Open sea kept inside every region border (m). */
+    margin: number;
+    /** How far bays cut into the land (m). */
+    setback: number;
+    /** Coast noise wavelength (m) and octaves. */
+    scale: number;
+    octaves: number;
+    /** Height of the coastline nodes (m above sea level). */
+    beach: number;
+    /** 0 = every continent fills its region; 1 = sizes vary down to nothing. */
+    sizeVariation: number;
+  };
+  network: {
+    /** Spacing of the drainage network grid (m). */
+    grid: number;
+    /** Random spread of the growth cost, so basins branch naturally. */
+    jitter: number;
+    /** Extra start cost of the outlets: higher gives fewer, larger rivers. */
+    mouthBias: number;
+  };
+  relief: {
+    /** Slope at 1 km² of drainage for uplift 1 (S = k·U·A^−θ). */
+    k: number;
+    /** θ in S ∝ A^−θ (stream power concavity). */
+    concavity: number;
+    minSlope: number;
+    maxSlope: number;
+    /** Uplift noise: its zero lines become mountain belts. */
+    uplift: ClimateNoise;
+    detail: DetailSettings;
+  };
+  climate: {
+    /** Rain multiplier noise (0.4 … 1.6). */
+    rain: ClimateNoise;
+    /** Runoff (mm per year) — turns upstream area into discharge. */
+    runoff: number;
+    temperature: ClimateNoise;
+  };
+  rivers: {
+    /** Drainage area (km², rain-weighted) where a river starts. */
+    threshold: number;
+    /** Width and depth of a river draining 100 km² (m). */
+    width100: number;
+    depth100: number;
+    /** Floodplain half-width, in channel widths. */
+    floodplain: number;
+    /** Height of the banks above the water (m). */
+    bank: number;
+    /** Meander strength (0 = straight). */
+    meander: number;
+  };
+  lakes: { enabled: boolean; chance: number; radius: number };
+  biomes: {
+    mode: BiomeMode;
+    beachHeight: number;
+    peakHeight: number;
+    snowLine: number;
+    /** Metres of altitude that cool the climate by one temperature unit. */
+    lapse: number;
+  };
+  colorMode: WatershedColorMode;
+}
+
 export interface RenderSettings {
   timeOfDay: number;
   dayCycle: boolean;
@@ -240,6 +351,7 @@ export interface AppSettings {
   seed: string;
   terrain: TerrainSettings;
   terrainView: TerrainViewSettings;
+  watershed: WatershedSettings;
   voxel: VoxelSettings;
   planet: PlanetSettings;
   erosion: ErosionSettings;
@@ -469,6 +581,48 @@ export function defaultErosion(): ErosionSettings {
   };
 }
 
+export function defaultWatershed(): WatershedSettings {
+  return {
+    seaLevel: 0,
+    verticalScale: 1,
+    regions: { size: 64000, jitter: 0.7, warp: 6000, warpScale: 40000, landChance: 0.9 },
+    coast: { margin: 4000, setback: 14000, scale: 24000, octaves: 8, beach: 0.6, sizeVariation: 0.35 },
+    network: { grid: 256, jitter: 0.45, mouthBias: 0.6 },
+    relief: {
+      k: 0.045,
+      concavity: 0.5,
+      minSlope: 0.0004,
+      maxSlope: 0.85,
+      uplift: climate(28000, 4, 1.2),
+      detail: {
+        noise: 'simplex',
+        fractal: 'uber',
+        scale: 900,
+        octaves: 8,
+        lacunarity: 2,
+        gain: 0.5,
+        sharpness: 0.3,
+        slopeErosion: 0.6,
+        altitudeErosion: 0.2,
+        ridgeErosion: 0.15,
+        perturb: 0.2,
+        featureAmp: 0.1,
+        amplitude: 22,
+        mountainBias: 0.85,
+      },
+    },
+    climate: {
+      rain: climate(30000, 3, 1),
+      runoff: 350,
+      temperature: { ...climate(90000, 3, 1.1), offset: 0.2 },
+    },
+    rivers: { threshold: 3, width100: 22, depth100: 2.2, floodplain: 2, bank: 0.8, meander: 1 },
+    lakes: { enabled: true, chance: 0.25, radius: 2500 },
+    biomes: { mode: 'whittaker', beachHeight: 2, peakHeight: 520, snowLine: 520, lapse: 1000 },
+    colorMode: 'natural',
+  };
+}
+
 export function defaultSettings(): AppSettings {
   return {
     version: 1,
@@ -476,6 +630,7 @@ export function defaultSettings(): AppSettings {
     seed: 'worldgen-lab',
     terrain: defaultTerrain(),
     terrainView: defaultTerrainView(),
+    watershed: defaultWatershed(),
     voxel: defaultVoxel(),
     planet: defaultPlanet(),
     erosion: defaultErosion(),
@@ -652,6 +807,77 @@ export const TERRAIN_PRESETS: TerrainPreset[] = [
       s.terrainView.saturation = 1.3;
       s.terrainView.water.shallowColor = '#b04fd6';
       s.terrainView.water.deepColor = '#3a0f57';
+    },
+  },
+];
+
+/** Presets for the Watershed mode. Every preset keeps the 64 km regions. */
+export const WATERSHED_PRESETS: TerrainPreset[] = [
+  {
+    name: 'Temperate continents (default)',
+    description: 'One continent per 64 km region, mountain belts, branching rivers and a few lakes.',
+    apply: () => {},
+  },
+  {
+    name: 'Highlands',
+    description: 'Strong uplift and rugged detail: deep valleys, mountain lakes and snowy ranges.',
+    apply: (s) => {
+      const w = s.watershed;
+      w.relief.k = 0.07;
+      w.relief.uplift.amplitude = 0.8;
+      w.relief.detail.amplitude = 34;
+      w.climate.temperature.offset = -0.05;
+      w.lakes.chance = 0.45;
+    },
+  },
+  {
+    name: 'Lowland plains',
+    description: 'Gentle relief, wide floodplains and strongly meandering rivers.',
+    apply: (s) => {
+      const w = s.watershed;
+      w.relief.k = 0.022;
+      w.relief.uplift.amplitude = 2;
+      w.relief.detail.amplitude = 8;
+      w.rivers.floodplain = 3.2;
+      w.rivers.meander = 1.4;
+      w.climate.rain.offset = 0.2;
+    },
+  },
+  {
+    name: 'Archipelago',
+    description: 'Ragged coasts that break up into islands, each with its own small rivers.',
+    apply: (s) => {
+      const w = s.watershed;
+      w.coast.setback = 22000;
+      w.coast.scale = 14000;
+      w.coast.sizeVariation = 0.6;
+      w.climate.temperature.offset = 0.45;
+      w.network.mouthBias = 0.3;
+    },
+  },
+  {
+    name: 'Great rivers',
+    description: 'Few, long rivers: high mouth bias, wide channels and a wet climate.',
+    apply: (s) => {
+      const w = s.watershed;
+      w.network.mouthBias = 1.6;
+      w.rivers.threshold = 6;
+      w.rivers.width100 = 36;
+      w.rivers.depth100 = 3;
+      w.rivers.meander = 1.3;
+      w.climate.rain.offset = 0.3;
+    },
+  },
+  {
+    name: 'Arid',
+    description: 'Hot and dry: deserts and savanna, thin rivers, rare lakes.',
+    apply: (s) => {
+      const w = s.watershed;
+      w.climate.rain.offset = -0.55;
+      w.climate.temperature.offset = 0.55;
+      w.climate.runoff = 120;
+      w.rivers.width100 = 12;
+      w.lakes.chance = 0.08;
     },
   },
 ];

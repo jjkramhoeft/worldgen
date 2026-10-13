@@ -311,6 +311,38 @@ Snow thins out on slopes between 35° and 52°.</li>
 `,
   },
   {
+    id: 'doc-watershed',
+    title: 'Watershed worlds: rivers first',
+    html: tex`
+<p>Terrain mode makes heights first and lets rivers be wherever a noise is near zero, so its rivers never fork, join or reach the sea. The Watershed mode works the other way round, after Génevaux et al. (2013) and Derzapf et al. (2011): each continent first gets its river mouths, then a drainage network grows inland from them, the rivers get heights from the mouth upward, and only then is the ground shaped around them (<code>watershed/*.ts</code>). Every river therefore runs downhill, tributaries join, and every drop of water reaches the sea.</p>
+<h5>One continent per region</h5>
+<p>A river depends on its whole basin, so it cannot be computed point by point. The plane is split into regions: one jittered site per \(R \times R\) lattice cell (\(R = 64\) km), and a point belongs to the site nearest its domain-warped position \(\mathbf p'\). With \(b\) the exact distance to the Voronoi border (the nearest bisector),</p>
+\[ b(\mathbf p) = \min_{k} \frac{|\mathbf p' - \mathbf s_k|^2 - |\mathbf p' - \mathbf s_1|^2}{2\,|\mathbf s_k - \mathbf s_1|}, \qquad L(\mathbf p) = f\,b - m - \sigma\, n(\mathbf p') , \]
+<p>the coast function \(L\) is positive on land. The margin \(m\) (4 km), the bay setback \(\sigma\) (14 km) with coast noise \(n \in [0,1]\), and a size factor \(f\) per region keep each continent strictly inside its region. Ocean regions use \(-b\) instead of \(f b\), so \(L\) is continuous across every border. A region's network depends only on (seed, settings, region), so every worker builds identical copies on demand and caches the last four.</p>
+<h5>Growing the drainage network</h5>
+<p>Network nodes sit on a 256 m lattice. Land nodes next to the sea are <b>outlets</b>. A shortest-path forest grows inland from all of them at once (Dijkstra): the cost of the step from node \(a\) to its neighbour \(b\) is</p>
+\[ c(a \to b) = |ab| \cdot U(b) \cdot \big(1 + j\,(2\xi_b - 1)\big), \]
+<p>with uplift \(U\), jitter \(j = 0.45\) and a hashed \(\xi_b \in [0,1)\). Each node remembers the neighbour it was reached from as its <i>receiver</i>, so every node has exactly one way to the sea, and basins spread fastest through low uplift: rivers run in the structural lows. A diagonal step is refused if the other diagonal of the same grid cell is already a river edge, so rivers never cross. Outlets start with a hashed extra cost (the <i>mouth bias</i>): outlets that start late lose their land to their neighbours, which gives fewer, larger rivers.</p>
+<h5>Area, discharge and stream order</h5>
+<p>Visiting the nodes children first, each node adds its rain-weighted cell area to its receiver: \(A_n = g^2 r_n + \sum_{\text{children}} A_c\) (km²). A node is a river once \(A \ge 3\) km². Discharge is \(Q = A \times\) runoff (350 mm/yr, Hack's Potomac rule of about 0.011 m³/s per km²). Strahler order: sources are 1; if two inflows share the highest order the river's order goes up by one, otherwise it keeps the highest.</p>
+<h5>Heights, from the sea upward</h5>
+<p>In steady state, the stream power law \(\partial h/\partial t = u - k A^m S^n\) gives slopes \(S \propto A^{-m/n}\) with \(m/n \approx 0.5\) (Cordonnier et al. 2016). So heights are integrated from the outlets upward:</p>
+\[ h_n = h_{\text{receiver}} + |n - \text{receiver}| \cdot \clamp\!\big(k\, U_n\, A_n^{-\theta},\; S_{\min},\; S_{\max}\big), \qquad k = 0.045,\; \theta = 0.5 . \]
+<p>Big rivers get gentle slopes and small streams steep ones: river profiles come out concave, valleys cut deep, and the land between rivers rises into ridges where neighbouring basins meet. Every node is higher than its receiver, so the coarse surface has no pits at all. The uplift \(U = 0.3 + 1.5\,(1 - |v|)^3\) turns the zero lines of a noise \(v\) into mountain belts, halved near the coast.</p>
+<figure data-fig="watershed"><figcaption>One region of the default world, computed live: the drainage basins (one colour per river mouth) with the river network on top, and the shaded relief with its biomes.</figcaption></figure>
+<figure data-fig="riverProfile"><figcaption>Left: the long profile of the region's largest river, from its mouth to its source: flat lowlands, steep headwaters. Right: the slope–area law the heights follow, for low, middle and high uplift (dots: the nodes of that river).</figcaption></figure>
+<h5>Lakes</h5>
+<p>Some flat river nodes become a <i>sill</i>: the lake level is the sill height plus a hashed dam of 3–12 m, and the lake floods the sill's upstream subtree below that level. Filling only the subtree keeps the lake inside one basin. Any other neighbour lower than the lake is raised 1 m above it (and its upstream heights are lifted to keep draining), and the sill's downstream nodes may neither flood nor be raised, so a lake can only spill over its sill.</p>
+<h5>From network to ground</h5>
+<p>River reaches (chains between junctions) become smooth curves: centripetal Catmull–Rom splines through the jittered nodes, with sine-generated meanders of wavelength \(\lambda \approx 11W\) and amplitude up to \(2.7\,W^{1.1}\) (Leopold & Wolman 1960) that wander along the river. Width and depth follow downstream hydraulic geometry (Leopold & Maddock 1953): \(W = 22\,(A/100)^{0.5}\) m and \(D = 2.2\,(A/100)^{0.4}\) m. The base ground interpolates the node heights (Catmull–Rom, plus detail noise that fades out near rivers). Each river within reach then shapes it, with \(d\) the distance to its centreline, \(d_c\) to its meandering channel, \(F\) the floodplain half-width and \(s\) a valley-wall slope:</p>
+\[ v = w + \beta + s \max(0, d - F), \qquad \ell = w + \beta - s \max(0, d - F), \qquad c = w + \beta - (D + \beta)\Big(1 - \big(\tfrac{2 d_c}{W}\big)^2\Big), \]
+\[ h = \min\!\big(\max(\min(g_0, v),\; \ell),\; c\big) . \]
+<p>The valley term \(v\) cuts a valley with a flat floodplain at the water level \(w\) plus the bank \(\beta\); the levee \(\ell\) raises the banks wherever the base was lower than the water, so a river can never spill; and \(c\) is the parabolic channel. Beyond the floodplain, \(v\) and \(\ell\) hand over to \(g_0\) smoothly. Every term is a minimum or maximum of continuous functions, so the surface stays continuous through confluences and coastlines.</p>
+<h5>Water and level of detail</h5>
+<p>Each sample carries its own water level: the river's \(w\) across its floodplain, the lake level in a lake, the sea level below the sea, or none. The water mesh follows it, so rivers slope downhill and lakes sit above sea level; the water under the banks stays hidden by the ground. River vertices also carry their downstream direction, and the water shader carries its ripples along it. Far tiles cannot resolve narrow channels: there, a channel is widened up to \(2.5\Delta\) (at most 80 m and six times its width) or, if still unresolved, not cut at all, and meanders fade out once \(\Delta > \lambda/16\).</p>
+`,
+  },
+  {
     id: 'doc-voxel',
     title: 'Voxel worlds',
     html: tex`

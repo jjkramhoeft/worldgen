@@ -7,11 +7,15 @@ import { renderMapStrip } from '../gen/map';
 import { VoxelGenerator } from '../gen/voxel/voxelGen';
 import { PlanetGenerator } from '../gen/planet/planetGen';
 import { buildPlanetNode, renderPlanetMapStrip } from '../gen/planet/planetMesh';
+import { WatershedGenerator } from '../gen/watershed/watershedGen';
+import { WatershedShader } from '../gen/watershed/shading';
+import { renderWatershedMapStrip } from '../gen/watershed/map';
 import { collectTransferables, type FromGenWorker, type JobPayloads, type ToGenWorker } from './protocol';
 
 let settings: AppSettings | null = null;
 let version = 0;
 let terrain: { gen: TerrainGenerator; shader: TerrainShader } | null = null;
+let watershed: { gen: WatershedGenerator; shader: WatershedShader } | null = null;
 let voxel: VoxelGenerator | null = null;
 let planet: PlanetGenerator | null = null;
 
@@ -23,6 +27,22 @@ function getTerrain(s: AppSettings) {
     terrain = { gen, shader: new TerrainShader(s.terrain, s.terrainView.colorMode, s.terrainView) };
   }
   return terrain;
+}
+
+/** Region networks take a while to build, so a new generator is only made when the world itself changed. */
+let watershedKey = '';
+let watershedGen: WatershedGenerator | null = null;
+
+function getWatershed(s: AppSettings) {
+  if (!watershed) {
+    const key = JSON.stringify([s.seed, { ...s.watershed, colorMode: '' }]);
+    if (!watershedGen || key !== watershedKey) {
+      watershedGen = new WatershedGenerator(s.seed, s.watershed);
+      watershedKey = key;
+    }
+    watershed = { gen: watershedGen, shader: new WatershedShader(s.watershed, s.watershed.colorMode, s.terrainView) };
+  }
+  return watershed;
 }
 
 function getVoxel(s: AppSettings) {
@@ -43,6 +63,12 @@ function run(kind: keyof JobPayloads, payload: unknown, s: AppSettings): unknown
     }
     case 'map':
       return renderMapStrip(getTerrain(s).gen, s.terrainView, payload as JobPayloads['map']);
+    case 'watershedNode': {
+      const w = getWatershed(s);
+      return buildTerrainNode(w.gen, w.shader, s.terrainView, payload as JobPayloads['watershedNode']);
+    }
+    case 'watershedMap':
+      return renderWatershedMapStrip(getWatershed(s).gen, s.terrainView, payload as JobPayloads['watershedMap']);
     case 'voxelChunk':
       return getVoxel(s).generate(payload as JobPayloads['voxelChunk']);
     case 'planetNode':
@@ -64,6 +90,7 @@ self.addEventListener('message', (e: MessageEvent<ToGenWorker>) => {
     settings = msg.settings;
     version = msg.version;
     terrain = null;
+    watershed = null;
     voxel = null;
     planet = null;
     return;

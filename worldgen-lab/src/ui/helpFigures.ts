@@ -16,7 +16,21 @@ import { renderMapStrip, type MapLayer } from '../gen/map';
 import { craterProfile, PlanetGenerator } from '../gen/planet/planetGen';
 import { cubeToSphere, renderPlanetMapStrip } from '../gen/planet/planetMesh';
 import { derivePlanet, PROFILES } from '../gen/planet/universe';
-import { defaultErosion, defaultPlanet, defaultSettings, defaultTerrain, defaultTerrainView, PLANET_TYPES, type ClimateNoise, type PlanetType } from '../gen/settings';
+import {
+  defaultErosion,
+  defaultPlanet,
+  defaultSettings,
+  defaultTerrain,
+  defaultTerrainView,
+  defaultWatershed,
+  PLANET_TYPES,
+  type ClimateNoise,
+  type PlanetType,
+} from '../gen/settings';
+import { WatershedGenerator } from '../gen/watershed/watershedGen';
+import { renderWatershedMapStrip } from '../gen/watershed/map';
+import { KIND_OUTLET } from '../gen/watershed/network';
+import { U_MAX, U_MIN } from '../gen/watershed/fields';
 import { LOD_COLORS } from '../gen/shading';
 import { peaksAndValleys, TerrainGenerator } from '../gen/terrain';
 import { BLOCKS, ORES } from '../gen/voxel/blocks';
@@ -573,6 +587,125 @@ const crater: Figure = (slot) => {
   });
 };
 
+// ───────────────────────────── watershed ─────────────────────────────
+
+let wsWorld: { gen: WatershedGenerator; i: number; j: number; sx: number; sz: number } | null = null;
+
+/** The default Watershed world and its land region nearest the origin (built once, shared by the figures). */
+function watershedWorld() {
+  if (!wsWorld) {
+    const gen = new WatershedGenerator(SEED, defaultWatershed());
+    const [sx, sz] = gen.nearestLand(0, 0);
+    const R = gen.fields.lattice.R;
+    wsWorld = { gen, i: Math.floor(sx / R), j: Math.floor(sz / R), sx, sz };
+  }
+  return wsWorld;
+}
+
+const WATERSHED_LAYERS: [MapLayer, string][] = [
+  ['basins', 'Drainage basins and rivers'],
+  ['shaded', 'Shaded relief'],
+];
+
+const watershedFig: Figure = (slot) => {
+  const N = 256;
+  const grid = tileGrid(slot, 'wide');
+  const ctxs = WATERSHED_LAYERS.map(([, label]) => addTile(grid, label, N, N));
+  return async () => {
+    const { gen, sx, sz } = watershedWorld();
+    const view = defaultTerrainView();
+    const extent = 72000;
+    const rows = 16;
+    for (let k = 0; k < WATERSHED_LAYERS.length; k++) {
+      for (let r = 0; r < N; r += rows) {
+        const res = renderWatershedMapStrip(gen, view, {
+          x0: sx - extent / 2,
+          z0: sz - extent / 2,
+          scale: extent / N,
+          width: N,
+          height: N,
+          rowStart: r,
+          rowEnd: r + rows,
+          layer: WATERSHED_LAYERS[k][0],
+          histograms: false,
+        });
+        ctxs[k].putImageData(new ImageData(new Uint8ClampedArray(res.pixels), N, rows), 0, r);
+        await idle();
+      }
+    }
+  };
+};
+
+const riverProfile: Figure = (slot) => {
+  slot.innerHTML = '<div class="fig-plots two"><p class="plot-caption">Computing the region…</p></div>';
+  return async () => {
+    await idle();
+    const { gen, i, j } = watershedWorld();
+    const net = gen.region(i, j);
+    const s = defaultWatershed();
+    // The largest basin's main stem: from its mouth, always up the child with the largest area.
+    let mouth = -1;
+    for (let m = 0; m < net.n; m++) if (net.kind[m] === KIND_OUTLET && (mouth < 0 || net.area[m] > net.area[mouth])) mouth = m;
+    const up = new Int32Array(net.n).fill(-1);
+    for (let m = 0; m < net.n; m++) {
+      const r = net.receiver[m];
+      if (r >= 0 && (up[r] < 0 || net.area[m] > net.area[up[r]])) up[r] = m;
+    }
+    const xs = [0];
+    const hs = [net.height[mouth]];
+    const pts: [number, number][] = [];
+    let dist = 0;
+    for (let c = mouth; up[c] >= 0; ) {
+      const n = up[c];
+      dist += Math.hypot(net.ga[n] - net.ga[c], net.gb[n] - net.gb[c]) * net.g;
+      xs.push(dist / 1000);
+      hs.push(net.height[n]);
+      if (net.lake[n] < 0) pts.push([Math.log10(net.area[n]), Math.log10(net.slope[n])]);
+      c = n;
+    }
+    const total = xs[xs.length - 1];
+    const prof = (x: number) => {
+      let k = 1;
+      while (k < xs.length - 1 && xs[k] < x) k++;
+      const t = (x - xs[k - 1]) / Math.max(1e-9, xs[k] - xs[k - 1]);
+      return hs[k - 1] + (hs[k] - hs[k - 1]) * Math.max(0, Math.min(1, t));
+    };
+    const top = Math.max(...hs);
+    const law = (U: number) => (la: number) =>
+      Math.log10(Math.max(s.relief.minSlope, Math.min(s.relief.maxSlope, s.relief.k * U * Math.pow(10, -s.relief.concavity * la))));
+    const tick = (lim: number, step: number) => Array.from({ length: Math.floor(lim / step) + 1 }, (_, k) => k * step);
+    const series: Series[] = [
+      { f: law(U_MIN), color: C.green, label: `U = ${U_MIN}` },
+      { f: law(1), color: C.yellow, label: 'U = 1' },
+      { f: law(U_MAX), color: C.red, label: `U = ${U_MAX}` },
+    ];
+    slot.innerHTML =
+      `<div class="fig-plots two">` +
+      `<div>${plot({
+        title: 'Long profile',
+        x: [0, total],
+        y: [0, top * 1.1],
+        series: [{ f: prof, color: C.blue }],
+        xTicks: tick(total, total > 40 ? 10 : 5),
+        yTicks: tick(top * 1.1, top > 500 ? 200 : 100),
+        xLabel: 'km from the mouth',
+        yLabel: 'height (m)',
+      })}</div>` +
+      `<div>${plot({
+        title: 'Slope–area law',
+        x: [-1.5, 3],
+        y: [-3.5, 0],
+        series,
+        points: pts,
+        xTicks: [-1, 0, 1, 2, 3],
+        yTicks: [-3, -2, -1, 0],
+        xLabel: 'log₁₀ upstream area (km²)',
+        yLabel: 'log₁₀ slope',
+      })}${legend(series)}</div>` +
+      `</div>`;
+  };
+};
+
 /** The region the Erosion mode picks on its first visit: largest relief, mostly land, near the origin. */
 function ruggedRegion(gen: TerrainGenerator, extent: number, sea: number): [number, number] {
   let best = { score: -Infinity, x: 0, z: 0 };
@@ -674,6 +807,8 @@ export const FIGURES: Record<string, Figure> = {
   splines,
   climate,
   quadtree,
+  watershed: watershedFig,
+  riverProfile,
   cubeSphere,
   planets,
   crater,

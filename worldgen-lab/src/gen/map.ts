@@ -20,7 +20,27 @@ export type MapLayer =
   | 'temperature'
   | 'humidity'
   | 'river'
-  | 'heightmap';
+  | 'heightmap'
+  // Watershed mode only:
+  | 'basins'
+  | 'order'
+  | 'discharge'
+  | 'uplift'
+  | 'rain';
+
+/** Layers of the Watershed mode's map and minimap. */
+export const WATERSHED_MAP_LAYERS: { value: MapLayer; label: string }[] = [
+  { value: 'shaded', label: 'Shaded relief' },
+  { value: 'biome', label: 'Biomes' },
+  { value: 'height', label: 'Height' },
+  { value: 'basins', label: 'Drainage basins' },
+  { value: 'order', label: 'Stream order' },
+  { value: 'discharge', label: 'Upstream area' },
+  { value: 'uplift', label: 'Uplift' },
+  { value: 'rain', label: 'Rain' },
+  { value: 'temperature', label: 'Temperature' },
+  { value: 'humidity', label: 'Humidity' },
+];
 
 export const MAP_LAYERS: { value: MapLayer; label: string }[] = [
   { value: 'shaded', label: 'Shaded relief' },

@@ -9,11 +9,13 @@ import { Environment } from '../engine/Environment';
 import { WorkerPool } from '../engine/WorkerPool';
 import {
   TERRAIN_PRESETS,
+  WATERSHED_PRESETS,
   assignDeep,
   decodeShare,
   defaultSettings,
   defaultTerrain,
   defaultTerrainView,
+  defaultWatershed,
   encodeShare,
   mergeSettings,
   type AppSettings,
@@ -27,6 +29,8 @@ import type { WorldMode } from '../modes/Mode';
 import { PlanetMode } from '../modes/PlanetMode';
 import { TerrainMode } from '../modes/TerrainMode';
 import { VoxelMode } from '../modes/VoxelMode';
+import { WatershedMode } from '../modes/WatershedMode';
+import { BIOMES } from '../gen/biomes';
 import { download } from '../ui/dom';
 import type { CameraChoice } from '../ui/Toolbar';
 import { UI } from '../ui/UI';
@@ -71,7 +75,7 @@ export class App {
   readonly env: Environment;
   readonly rig: CameraRig;
   readonly pool = new WorkerPool();
-  readonly modes: { terrain: TerrainMode; voxel: VoxelMode; planet: PlanetMode; erosion: ErosionMode };
+  readonly modes: { terrain: TerrainMode; watershed: WatershedMode; voxel: VoxelMode; planet: PlanetMode; erosion: ErosionMode };
   mode: WorldMode;
   ui: UI;
   genVersion = 1;
@@ -111,6 +115,7 @@ export class App {
     this.pool.setSettings(this.settings, this.genVersion);
     this.modes = {
       terrain: new TerrainMode(this),
+      watershed: new WatershedMode(this),
       voxel: new VoxelMode(this),
       planet: new PlanetMode(this),
       erosion: new ErosionMode(this),
@@ -317,6 +322,18 @@ export class App {
     this.ui.toasts.show(`Preset: ${preset.name}`);
   }
 
+  applyWatershedPreset(index: number): void {
+    const preset = WATERSHED_PRESETS[index];
+    if (!preset) return;
+    const next = structuredClone(this.settings);
+    next.watershed = { ...defaultWatershed(), colorMode: this.settings.watershed.colorMode };
+    preset.apply(next);
+    assignDeep(this.settings, next);
+    this.ui.panel.refresh();
+    this.regenerateNow();
+    this.ui.toasts.show(`Preset: ${preset.name}`);
+  }
+
   /** Re-derives every planet parameter from (seed, region, system, planet). */
   derivePlanet(type?: AppSettings['planet']['type']): void {
     this.derivePlanetQuiet(type);
@@ -411,6 +428,34 @@ export class App {
     return this.probeTerrain.gen.sample(x, z, this.terrainSample);
   }
 
+  /** Text for the world map's "under the cursor" box. */
+  mapReadout(x: number, z: number): string {
+    if (this.settings.mode === 'watershed') {
+      const d = this.modes.watershed.generator.describe(x, z);
+      const s = d.sample;
+      return (
+        `x ${x.toFixed(0)}  z ${z.toFixed(0)}\n` +
+        `${BIOMES[s.biome].name}\n` +
+        `height      ${s.height.toFixed(1)} m\n` +
+        `water       ${Number.isNaN(s.water) ? '—' : `${s.water.toFixed(1)} m${s.lake >= 0 ? ' lake' : ''}`}\n` +
+        `region      ${s.regionI}, ${s.regionJ}${s.land ? '' : ' (sea)'}\n` +
+        `upstream    ${s.area.toFixed(s.area < 10 ? 2 : 0)} km²\n` +
+        `discharge   ${d.discharge.toFixed(d.discharge < 1 ? 3 : 1)} m³/s\n` +
+        `order       ${s.order || '—'}`
+      );
+    }
+    const s = this.sampleTerrain(x, z);
+    return (
+      `x ${x.toFixed(0)}  z ${z.toFixed(0)}\n` +
+      `${BIOMES[s.biome].name}\n` +
+      `height      ${s.height.toFixed(1)} m\n` +
+      `continent.  ${s.continentalness.toFixed(3)}\n` +
+      `erosion     ${s.erosion.toFixed(3)}\n` +
+      `weird / PV  ${s.weirdness.toFixed(2)} / ${s.pv.toFixed(2)}\n` +
+      `temp / hum  ${s.temperature.toFixed(2)} / ${s.humidity.toFixed(2)}`
+    );
+  }
+
   samplePlanet(lat: number, lon: number): PlanetSample {
     if (!this.probePlanet || this.probePlanet.version !== this.genVersion) {
       this.probePlanet = { version: this.genVersion, gen: new PlanetGenerator(this.settings.seed, structuredClone(this.settings.planet)) };
@@ -474,18 +519,19 @@ export class App {
       for (const s of strips) if (s) ctx.putImageData(new ImageData(new Uint8ClampedArray(s.result.pixels), W, s.result.rowEnd - s.result.rowStart), 0, s.result.rowStart);
       name = `${this.fileStem()}-surface-equirect.png`;
     } else {
+      const watershed = mode === 'watershed';
       const N = 1024;
-      const scale = 2;
+      const scale = watershed ? 16 : 2;
       const [cx, cz] = this.focusXZ();
-      const vs = this.settings.terrain.verticalScale;
-      const minH = -80 * vs;
-      const maxH = 420 * vs;
+      const vs = watershed ? this.settings.watershed.verticalScale : this.settings.terrain.verticalScale;
+      const minH = (watershed ? -40 : -80) * vs;
+      const maxH = (watershed ? 700 : 420) * vs;
       canvas.width = canvas.height = N;
       this.ui.toasts.show('Rendering heightmap…');
       const strips = await Promise.all(
         Array.from({ length: 8 }, (_, k) =>
           this.pool.run(
-            'map',
+            watershed ? 'watershedMap' : 'map',
             { x0: cx - (N / 2) * scale, z0: cz - (N / 2) * scale, scale, width: N, height: N, rowStart: (k * N) / 8, rowEnd: ((k + 1) * N) / 8, layer: 'heightmap', histograms: false, minH, maxH },
             { priority: -30 },
           ),
@@ -582,11 +628,19 @@ export class App {
     if (this.mode.id !== 'planet') {
       const focus = this.rig.mode === 'orbit' ? this.rig.orbit.target : this.camera.position;
       const vs = this.settings.terrain.verticalScale;
+      const cloudHeight =
+        this.mode.id === 'voxel'
+          ? 230
+          : this.mode.id === 'erosion'
+            ? this.settings.erosion.extent * 1.1
+            : this.mode.id === 'watershed'
+              ? 950 * this.settings.watershed.verticalScale
+              : 520 * vs;
       this.env.update({
         render: r,
         camera: this.camera,
         viewDistance: this.mode.viewDistance(),
-        cloudHeight: this.mode.id === 'voxel' ? 230 : this.mode.id === 'erosion' ? this.settings.erosion.extent * 1.1 : 520 * vs,
+        cloudHeight,
         focus,
         shadowRadius: this.mode.id === 'voxel' ? 90 : this.mode.id === 'erosion' ? this.settings.erosion.extent * 0.6 : 260,
         time: this.time,
