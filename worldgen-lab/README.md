@@ -1,6 +1,10 @@
 # Worldgen Lab
 
-An interactive sandbox for **procedural world generation**. Tweak any parameter and the world rebuilds around you in real time. There are four world types:
+An interactive sandbox for **procedural world generation**. Tweak any parameter and the world rebuilds around you in real time.
+
+**Try it live: https://jjkramhoeft.github.io/worldgen/** (needs a browser with WebGL2). The site is rebuilt and redeployed by GitHub Actions on every push to `main`.
+
+There are four world types:
 
 | Mode | What it shows |
 |---|---|
