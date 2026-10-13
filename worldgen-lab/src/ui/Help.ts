@@ -1,4 +1,8 @@
-/** Controls & concepts overlay (H / ?). Shown automatically on the first visit. */
+/**
+ * Controls & concepts overlay (H / ?). Shown automatically on the first visit.
+ * The "How it works" section below the quick reference (helpDocs.ts, with KaTeX)
+ * is loaded the first time the overlay opens.
+ */
 import { h } from './dom';
 
 const SEEN_KEY = 'worldgen-lab:seen-help';
@@ -6,9 +10,11 @@ const SEEN_KEY = 'worldgen-lab:seen-help';
 export class Help {
   readonly root: HTMLElement;
   isOpen = false;
+  private readonly body: HTMLElement;
+  private docs: Promise<HTMLElement | null> | null = null;
 
   constructor() {
-    const body = h('div', { class: 'help-body' });
+    const body = (this.body = h('div', { class: 'help-body' }));
     body.innerHTML = `
       <section>
         <h3>Worlds</h3>
@@ -59,7 +65,13 @@ export class Help {
         </ul>
       </section>`;
     const close = h('button', { class: 'btn primary', text: 'Start exploring', on: { click: () => this.close() } });
-    const card = h('div', { class: 'card help-card' }, h('header', {}, h('h2', { text: 'Worldgen Lab — controls & concepts' }), close), body);
+    const more = h('button', {
+      class: 'btn',
+      text: 'How it works ↓',
+      title: 'The mathematics and algorithms behind the worlds',
+      on: { click: () => this.showDocs() },
+    });
+    const card = h('div', { class: 'card help-card' }, h('header', {}, h('h2', { text: 'Worldgen Lab — controls & concepts' }), more, close), body);
     this.root = h('div', { class: 'overlay', attrs: { role: 'dialog', 'aria-label': 'Help' } }, card);
     this.root.addEventListener('pointerdown', (e) => {
       if (e.target === this.root) this.close();
@@ -80,6 +92,28 @@ export class Help {
   open(): void {
     this.isOpen = true;
     this.root.classList.add('open');
+    void this.loadDocs();
+  }
+
+  /** Loads the "How it works" section once; it is appended below the quick reference. */
+  private loadDocs(): Promise<HTMLElement | null> {
+    if (!this.docs) {
+      const placeholder = h('section', { class: 'wide help-doc-loading', text: 'Loading “How it works”…' });
+      this.body.append(placeholder);
+      this.docs = import('./helpDocs')
+        .then((m) => m.mountHelpDocs(this.body, this.body))
+        .catch((err) => {
+          console.error('[help] could not load the docs', err);
+          this.docs = null;
+          return null;
+        })
+        .finally(() => placeholder.remove());
+    }
+    return this.docs;
+  }
+
+  private showDocs(): void {
+    void this.loadDocs().then((docs) => docs?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
   close(): void {

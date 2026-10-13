@@ -56,7 +56,7 @@ The app needs a browser with WebGL2: any current Chrome, Edge, Firefox or Safari
 | **[ ]** | Time of day −/+ 30 minutes. |
 | **P** | Screenshot. |
 | **U** | Hide or show all UI. |
-| **H**, **?** | Help. |
+| **H**, **?** | Help. Below the controls, **How it works** explains the mathematics and algorithms of every generator, with live figures. |
 | Voxel mode | **Left click** breaks a block, **right click** places one, **middle click** picks one, **1–9** selects a hotbar slot. |
 | Planets | In orbit, the wheel changes altitude. In flight, the ship levels itself with the horizon near the ground and **Z/X** rolls. |
 
@@ -106,7 +106,7 @@ Coarse tiles pass their vertex spacing to the generator. Noise octaves finer tha
 - **Terrain density:** `(surfaceY − y) + overhang noise × jaggedness`.
 - **Caves:** they combine with `min()`:
   - *Cheese:* big caverns where 3D fBm exceeds a threshold.
-  - *Spaghetti and noodle:* tunnels where two independent noises are both near zero (`max(|a|, |b|) < r`).
+  - *Spaghetti and noodle:* tunnels where two independent noises are both near zero (`max(|a|, |b|) < r`). Noodles are thinner than the lattice, so, as in Minecraft, their two noises are interpolated raw and combined per block; only cells whose corner values can contain a tube are evaluated.
   - A surface shell and a seabed guard keep caves from flooding the world.
 - **Surface rules** run per column: the top block and filler come from the biome, plus deepslate, bedrock, sea water above the surface, and lava in deep caves.
 - **Ores** form clusters, and **trees** sit on a jittered grid. Every chunk generates a 4-block margin, so trees and leaves cross chunk borders seamlessly.
@@ -153,6 +153,8 @@ src/
              (sky, sun/moon, fog, clouds, shadows) · CameraRig · shaders
   modes/     TerrainMode · VoxelMode · PlanetMode · ErosionMode · Vegetation
   ui/        Panel (Tweakpane) · Toolbar · Hud · Minimap · MapOverlay · SplineEditor · Help
+             helpDocs (the "How it works" chapters, typeset with KaTeX, loaded on first open)
+             helpFigures (live plots, images and tables computed by the generator code)
   app/App.ts settings flow, modes, exports, frame loop
 tests/       noise and terrain tests (Vitest)
 docs/        RESEARCH.md — the research notes behind the algorithms, with sources

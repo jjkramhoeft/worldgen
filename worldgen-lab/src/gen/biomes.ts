@@ -186,7 +186,7 @@ export function level(v: number, thresholds: readonly number[]): number {
   return i;
 }
 
-const MIDDLE = [
+export const MIDDLE = [
   [B.SNOWY_PLAINS, B.SNOWY_PLAINS, B.SNOWY_PLAINS, B.SNOWY_TAIGA, B.TAIGA],
   [B.PLAINS, B.PLAINS, B.FOREST, B.TAIGA, B.OLD_GROWTH_TAIGA],
   [B.FLOWER_FOREST, B.PLAINS, B.FOREST, B.BIRCH_FOREST, B.DARK_FOREST],
@@ -195,7 +195,7 @@ const MIDDLE = [
 ];
 
 // Variant biomes used when weirdness > 0 (null = keep the middle biome).
-const MIDDLE_VARIANT: (number | null)[][] = [
+export const MIDDLE_VARIANT: (number | null)[][] = [
   [B.ICE_SPIKES, null, B.SNOWY_TAIGA, null, null],
   [null, null, null, null, B.OLD_GROWTH_TAIGA],
   [B.SUNFLOWER_PLAINS, null, null, B.BIRCH_FOREST, null],
@@ -269,7 +269,7 @@ function classifyMinecraft(s: ClimateSample, p: BiomeParams): number {
 }
 
 // Whittaker-style: temperature (cooled by altitude) × moisture.
-const WHITTAKER = [
+export const WHITTAKER = [
   [B.STONY_PEAKS, B.SNOWY_PLAINS, B.SNOWY_SLOPES, B.SNOWY_SLOPES, B.SNOWY_SLOPES],
   [B.DESERT, B.WINDSWEPT_HILLS, B.TAIGA, B.TAIGA, B.SNOWY_TAIGA],
   [B.DESERT, B.PLAINS, B.FOREST, B.FOREST, B.DARK_FOREST],

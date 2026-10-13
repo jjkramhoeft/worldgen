@@ -11,7 +11,7 @@ import type { TerrainSample } from './terrain';
 const SNOW = hexToRgb('#f3f6f9');
 const UNDERWATER = hexToRgb('#28474f');
 const BANDS = ['#a65a36', '#c27a45', '#d8a46c', '#8e4b37', '#e3c8a8', '#b8653a', '#9a6a52', '#cf8f5a', '#7d4a3a'].map(hexToRgb);
-const LOD_COLORS = ['#e4572e', '#f3a712', '#a8c256', '#29bf12', '#00a5cf', '#4f5bd5', '#962fbf', '#d62976', '#ffffff'].map(hexToRgb);
+export const LOD_COLORS = ['#e4572e', '#f3a712', '#a8c256', '#29bf12', '#00a5cf', '#4f5bd5', '#962fbf', '#d62976', '#ffffff'].map(hexToRgb);
 
 function bandIndex(h: number): number {
   let x = Math.floor(h / 4) | 0;

@@ -32,6 +32,17 @@ export function planetSeed(seedText: string, p: Pick<PlanetSettings, 'region' | 
   return deriveSeed(seedFromString(seedText), 0x5eed, p.region.x, p.region.y, p.region.z, p.system, p.planet);
 }
 
+/**
+ * Crater cross-section at t = distance / crater radius: a parabolic bowl
+ * (−1 at the centre, 0 at the rim) plus a Gaussian rim; nothing beyond t = 1.8.
+ */
+export function craterProfile(t: number): number {
+  if (t > 1.8) return 0;
+  const bowl = t < 1 ? t * t - 1 : 0;
+  const rim = Math.exp(-((t - 1) * (t - 1)) / 0.05) * 0.32;
+  return bowl + rim;
+}
+
 type PaletteRGB = Record<keyof PlanetPalette, RGB>;
 
 export class PlanetGenerator {
@@ -125,11 +136,7 @@ export class PlanetGenerator {
       const id = this.cell[2];
       if (id > Math.min(0.95, 0.35 * p.density * (1 + k * 0.5))) continue;
       const r = 0.16 + 0.26 * ((id * 7.31) % 1);
-      const t = this.cell[0] / r;
-      if (t > 1.8) continue;
-      const bowl = t < 1 ? t * t - 1 : 0;
-      const rim = Math.exp(-((t - 1) * (t - 1)) / 0.05) * 0.32;
-      total += (bowl + rim) * r * (4.5 / (1 + k * 1.2));
+      total += craterProfile(this.cell[0] / r) * r * (4.5 / (1 + k * 1.2));
     }
     return total;
   }

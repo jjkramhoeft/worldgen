@@ -25,7 +25,7 @@ interface TypeProfile {
   sharpness: [number, number];
 }
 
-const PROFILES: Record<PlanetType, TypeProfile> = {
+export const PROFILES: Record<PlanetType, TypeProfile> = {
   lush: {
     weight: 3,
     palette: { deep: '#13294b', shallow: '#2f7f8f', beach: '#d8c897', lowDry: '#a2a256', lowWet: '#3d7a35', high: '#627048', rock: '#756e66', snow: '#f3f6f8' },

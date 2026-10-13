@@ -64,7 +64,7 @@ const MAX_OCTAVES = 16;
 const OCTAVE_ANGLE = Math.atan2(0.6, 0.8);
 
 /** Weight of an octave of frequency f under the limit: 1 up to max/2, fading to 0 at max. */
-function octaveFade(f: number, maxFreq: number): number {
+export function octaveFade(f: number, maxFreq: number): number {
   return f <= maxFreq * 0.5 ? 1 : 2 - (2 * f) / maxFreq;
 }
 

@@ -9,6 +9,7 @@
   --text: #e7eaf0;
   --muted: #9aa3b2;
   --faint: #6b7483;
+  --doc-text: #c3cad6;
   --accent: #7cc4ff;
   --accent-ink: #06243a;
   --good: #8fdc7a;
@@ -673,7 +674,7 @@ body.locked .crosshair {
   min-height: 7em;
 }
 .help-card {
-  width: min(880px, 100%);
+  width: min(1000px, 100%);
 }
 .help-body {
   padding: 16px 20px 20px;
@@ -713,6 +714,387 @@ body.locked .crosshair {
 }
 .help-body .wide {
   grid-column: 1 / -1;
+}
+
+/* ───────────── help: "How it works" ───────────── */
+.help-doc-loading {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.help-doc {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 20px;
+  margin-top: 6px;
+  scroll-margin-top: 4px;
+}
+.help-body .help-doc h3 {
+  font-size: 16px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.help-body .help-doc .lede {
+  color: var(--doc-text);
+  font-size: 13.5px;
+  line-height: 1.62;
+  margin: 0 0 10px;
+  max-width: 82ch;
+}
+.doc-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 12px 0 14px;
+}
+.doc-flow span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 196, 255, 0.28);
+  background: rgba(124, 196, 255, 0.08);
+  color: var(--accent);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.doc-flow i {
+  color: var(--faint);
+  font-style: normal;
+}
+.doc-layout {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+  margin-top: 8px;
+}
+.doc-toc {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+.doc-toc button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.doc-toc button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.doc-toc button.active {
+  color: var(--accent);
+  background: rgba(124, 196, 255, 0.09);
+}
+.doc-toc button .n {
+  font: 600 11px var(--mono);
+  color: var(--faint);
+  min-width: 15px;
+}
+.doc-toc button.active .n {
+  color: var(--accent);
+}
+.doc-toc button.top {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 12px;
+}
+.doc-body {
+  min-width: 0;
+}
+.doc-ch {
+  scroll-margin-top: 6px;
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.doc-ch:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.help-body .doc-ch h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+}
+.doc-ch h4 .n {
+  font: 600 13px var(--mono);
+  color: var(--accent);
+}
+.help-body .doc-ch h5 {
+  margin: 22px 0 8px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--accent);
+}
+.help-body .doc-ch p,
+.help-body .doc-ch li {
+  color: var(--doc-text);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.help-body .doc-ch p {
+  margin: 0 0 10px;
+}
+.help-body .doc-ch ul,
+.help-body .doc-ch ol {
+  padding-left: 22px;
+  margin: 0 0 12px;
+}
+.help-body .doc-ch li {
+  margin: 0 0 6px;
+}
+.help-body .doc-ch li::marker {
+  color: var(--faint);
+}
+.doc-ch b {
+  color: var(--text);
+  font-weight: 600;
+}
+.doc-ch code,
+.help-doc code {
+  font: 12px var(--mono);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d9dfe9;
+}
+.doc-ch a {
+  color: var(--accent);
+  text-decoration-color: rgba(124, 196, 255, 0.4);
+  text-underline-offset: 2px;
+}
+.doc-ch a:hover {
+  text-decoration-color: var(--accent);
+}
+.doc-code {
+  font: 12px/1.6 var(--mono);
+  color: #d9dfe9;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 4px 0 12px;
+  overflow-x: auto;
+}
+.doc-ch .katex {
+  font-size: 1.08em;
+  color: #e9edf3;
+}
+.doc-ch .katex-display {
+  margin: 10px 0 16px;
+  padding: 4px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.doc-ch .katex-display > .katex {
+  font-size: 1.12em;
+}
+.doc-note {
+  margin: 14px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: rgba(124, 196, 255, 0.07);
+  color: var(--doc-text);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.doc-note.try {
+  border-left-color: var(--good);
+  background: rgba(143, 220, 122, 0.07);
+}
+.doc-note.warn {
+  border-left-color: var(--warn);
+  background: rgba(255, 212, 121, 0.07);
+}
+.help-body .doc-ch .doc-ex {
+  margin-top: 14px;
+}
+.doc-refs li {
+  margin-bottom: 8px;
+}
+
+/* figures */
+.doc-fig {
+  margin: 14px 0 20px;
+}
+.doc-fig figcaption {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.help-body .doc-fig .fig-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+svg.plot {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+svg.plot text {
+  fill: var(--faint);
+  font-family: var(--font);
+  font-size: 10.5px;
+}
+svg.plot text.title {
+  fill: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+svg.plot text.mark-label {
+  fill: var(--muted);
+}
+svg.plot .grid {
+  stroke: rgba(255, 255, 255, 0.07);
+}
+svg.plot .axis {
+  stroke: rgba(255, 255, 255, 0.22);
+}
+svg.plot .mark {
+  stroke: rgba(255, 212, 121, 0.45);
+  stroke-dasharray: 3 3;
+}
+svg.plot .pt {
+  fill: var(--bg);
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+svg.plot.quadtree,
+svg.plot.sphere {
+  background: rgba(0, 0, 0, 0.3);
+}
+.fig-narrow {
+  max-width: 420px;
+}
+.plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.plot-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plot-legend i {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.plot-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.fig-plots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.fig-plots.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 560px;
+}
+.fig-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+}
+.fig-tiles.big {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.fig-tiles.wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 620px;
+}
+.fig-tiles .tile canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+.fig-tiles .tile span {
+  display: block;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* tables */
+.doc-table-wrap {
+  overflow-x: auto;
+  margin: 6px 0 16px;
+}
+.help-body table.doc-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.help-body .doc-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.help-body .doc-table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--doc-text);
+  vertical-align: top;
+  line-height: 1.45;
+}
+.help-body .doc-table td:first-child {
+  color: var(--text);
+  padding-right: 14px;
+}
+.help-body .biome-grid td {
+  white-space: nowrap;
+}
+.biome-grid .swatch {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.biome-grid small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--faint);
 }
 .btn {
   border: 1px solid var(--line-strong);
@@ -805,5 +1187,31 @@ body.ui-hidden .panel {
   }
   .help-body {
     grid-template-columns: 1fr;
+  }
+  .help-card header {
+    flex-wrap: wrap;
+  }
+  .overlay .help-card header h2 {
+    flex-basis: 100%;
+  }
+  .doc-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .doc-toc {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .doc-toc button {
+    width: auto;
+    border: 1px solid var(--line);
+  }
+  .doc-toc button.top {
+    display: none;
+  }
+  .fig-plots.two {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -29,6 +29,14 @@ function softAbs(v: number): number {
   return Math.sqrt(v * v + SOFT * SOFT) - SOFT;
 }
 
+/**
+ * Minecraft's peaks & valleys fold 1 - |3·|W| - 2|, with a slightly rounded |·|
+ * so peaks and valley floors are sharp but not knife edges that alias into sawtooth crests.
+ */
+export function peaksAndValleys(weirdness: number): number {
+  return 1 - softAbs(3 * softAbs(weirdness) - 2);
+}
+
 export function emptySample(): TerrainSample {
   return {
     height: 0,
@@ -147,9 +155,7 @@ export class TerrainGenerator {
     }
     const e = this.ero.sample(px, pz, maxFreq);
     const w = this.weird.sample(px, pz, maxFreq);
-    // Minecraft's fold 1 - |3|W| - 2|, with a slightly rounded |·| so peaks and
-    // valley floors are sharp but not knife edges that alias into sawtooth crests.
-    const pv = 1 - softAbs(3 * softAbs(w) - 2);
+    const pv = peaksAndValleys(w);
 
     const base = this.splineC.eval(c);
     const mountain = clamp01(this.splineE.eval(e));
